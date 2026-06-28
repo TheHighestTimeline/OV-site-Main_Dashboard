@@ -1,0 +1,60 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[build.environment]
+  # Node 22 ships a native global WebSocket. This is the root-cause fix for the
+  # "Node.js 18 detected without native WebSocket support" error that @supabase/
+  # realtime-js throws inside its RealtimeClient constructor (which @supabase/
+  # supabase-js calls eagerly in createClient) — it was crashing References,
+  # Cost, Audio Dump, Booking, every company page, and the Google OAuth flow.
+  NODE_VERSION = "22"
+  # Pin the Functions Lambda runtime to match the build Node version so the
+  # serverless functions also run on Node 22 (not just the build step).
+  AWS_LAMBDA_JS_RUNTIME = "nodejs22.x"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[dev]
+  command = "npm run dev"
+  targetPort = 5173
+  port = 8888
+  framework = "#custom"
+
+[functions]
+  node_bundler = "esbuild"
+  included_files = []
+
+# ── Security headers — Phase 7 audit fix M-10 ───────────────────────────────
+# Content-Security-Policy + standard hardening headers applied to every
+# response. The CSP allows the dashboard to:
+#   - Run inline scripts/styles (required because the codebase uses inline
+#     style objects throughout — locking this down further is a Phase 15 cleanup)
+#   - Load scripts from Clerk (auth), JSDelivr (Websites iframe CDN), self
+#   - Make XHR/fetch to Clerk, Supabase, Anthropic, OpenAI, GitHub, Netlify,
+#     Notion, Google APIs
+#   - Embed iframes from Netlify (deploy previews) and the dashboard itself
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options             = "SAMEORIGIN"
+    X-Content-Type-Options      = "nosniff"
+    Referrer-Policy             = "strict-origin-when-cross-origin"
+    Permissions-Policy          = "camera=(self), microphone=(self), geolocation=(), payment=()"
+    Strict-Transport-Security   = "max-age=63072000; includeSubDomains; preload"
+    Content-Security-Policy     = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.com https://*.clerk.accounts.dev https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://*.clerk.com https://*.clerk.accounts.dev https://*.supabase.co wss://*.supabase.co https://api.anthropic.com https://api.openai.com https://api.github.com https://raw.githubusercontent.com https://api.netlify.com https://api.notion.com https://www.googleapis.com https://accounts.google.com https://cdn.jsdelivr.net; frame-src 'self' https://*.netlify.app https://*.clerk.com https://*.clerk.accounts.dev https://drive.google.com https://docs.google.com https://*.notion.site https://*.notion.so; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self';"
+
+# ── Long-term caching for build assets ──────────────────────────────────────
+# Vite fingerprints every file in /assets with a content hash (e.g.
+# index-a1b2c3d4.js). The filename changes whenever the contents change, so the
+# files are safe to cache forever. Without this header the browser re-validates
+# every JS/CSS chunk on each repeat visit, adding round-trips on the critical
+# path. "immutable" tells the browser not to even revalidate within the year.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

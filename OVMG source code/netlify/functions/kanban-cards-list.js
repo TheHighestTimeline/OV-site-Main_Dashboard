@@ -1,0 +1,29 @@
+import { getUser } from './_auth.js';
+import { getSupabase } from './_supabase.js';
+import { CORS } from './_notion.js';
+
+const ok = (body) => ({ statusCode: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+const err = (msg, code = 500) => ({ statusCode: code, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: msg }) });
+
+export async function handler(event) {
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
+  const user = await getUser(event);
+  if (!user) return err('Unauthorized', 401);
+
+  const boardId = event.queryStringParameters?.boardId;
+  if (!boardId) return err('boardId required', 400);
+
+  try {
+    const sb = getSupabase();
+    const { data, error } = await sb
+      .from('kanban_cards')
+      .select('*, kanban_card_tasks(*)')
+      .eq('board_id', boardId)
+      .is('deleted_at', null)
+      .order('position', { ascending: true });
+    if (error) throw error;
+    return ok({ cards: data || [] });
+  } catch (e) {
+    return err(e.message);
+  }
+}
