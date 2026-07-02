@@ -637,7 +637,11 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
                     onMouseEnter={e => e.currentTarget.style.background = C.cr1}
                     onMouseLeave={e => e.currentTarget.style.background = ''}>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: SERIF, fontWeight: 500, fontSize: 14, color: C.ink9 }}>{c.name}</td>
-                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>{c.company || '—'}</td>
+                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>
+                      {(c.companyNames || []).length
+                        ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>{c.companyNames.map(n => <Tag key={n} bg={C.accS} fg={C.accD}>{n}</Tag>)}</div>
+                        : (c.company || '—')}
+                    </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>{c.role || '—'}</td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}><div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>{(c.relatesTo || []).map(r => <Tag key={r} bg="transparent" fg={C.ink5}>{r}</Tag>)}</div></td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.email || '—'}</td>

@@ -6,6 +6,7 @@ import { COMPANIES, COMPANY_META, COMPANY_SUBTAB_LABELS } from '../constants/rol
 // ── Lazy imports (keep bundle chunks small) ────────────────────────────────────
 const Contacts       = lazy(() => import('./Contacts.jsx'));
 const Activities     = lazy(() => import('./Activities.jsx'));
+const Documents      = lazy(() => import('./Documents.jsx'));
 const Tasks          = lazy(() => import('./Tasks.jsx'));
 const Opportunities  = lazy(() => import('./Opportunities.jsx'));
 const AmplifyKanban  = lazy(() => import('./AmplifyKanban.jsx'));
@@ -20,6 +21,7 @@ const DriveView      = lazy(() => import('./DriveView.jsx'));
 const SUBTAB_ICONS = {
   contacts:   '◉',
   activities: '☰',
+  documents:  '⎘',
   tasks:      '▤',
   kanban:     '▦',
   opportunities: '◆',
@@ -151,6 +153,13 @@ function SubTabContent({ slug, subTab, user, showToast, openOv, closeOv, setView
         </Suspense>
       );
 
+    case 'documents':
+      return (
+        <Suspense fallback={<LoadingFallback />}>
+          <Documents {...sharedProps} companyFilter={slug} />
+        </Suspense>
+      );
+
     case 'tasks':
       return (
         <Suspense fallback={<LoadingFallback />}>
@@ -233,7 +242,7 @@ export default function CompanyView({ slug, subTab, ctx = {} }) {
   const subLabel = COMPANY_SUBTAB_LABELS[subTab] || subTab || 'Overview';
   const icon     = SUBTAB_ICONS[subTab] || '◇';
 
-  const hasContent = ['contacts', 'activities', 'tasks', 'kanban', 'opportunities', 'drive', 'references', 'html', 'email', 'tools'].includes(subTab);
+  const hasContent = ['contacts', 'activities', 'documents', 'tasks', 'kanban', 'opportunities', 'drive', 'references', 'html', 'email', 'tools'].includes(subTab);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

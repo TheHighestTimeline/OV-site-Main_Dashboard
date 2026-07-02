@@ -14,6 +14,14 @@ export const handler = async (event) => {
       sort: [{ field: 'Full Name', direction: 'asc' }],
     });
 
+    // Resolve linked Companies record IDs -> display names for the frontend.
+    const COMPANIES_TBL = process.env.AIRTABLE_TABLE_COMPANIES || 'Companies';
+    let companyNames = {};
+    try {
+      const companyRecords = await airtableList(COMPANIES_TBL);
+      companyNames = Object.fromEntries(companyRecords.map(r => [r.id, r.fields?.['Name'] || '']));
+    } catch { /* Companies table not reachable — companyNames stays empty, UI falls back gracefully */ }
+
     const contacts = records.map(r => {
       const c = fromAirtableRecord(r, CONTACTS_MAP);
 
@@ -29,6 +37,12 @@ export const handler = async (event) => {
                || null;
 
       c.website = r.fields['Website'] || r.fields['URL'] || null;
+
+      // New multi-company linked field (record IDs). Names get resolved
+      // below via a Companies lookup, same pattern tasks-list.js uses for
+      // owner/project names.
+      c.companyIds = r.fields['Companies'] || [];
+      c.companyNames = c.companyIds.map(id => companyNames[id]).filter(Boolean);
 
       return c;
     });

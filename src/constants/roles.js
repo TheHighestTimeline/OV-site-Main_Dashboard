@@ -27,43 +27,43 @@ export const COMPANY_META = {
   ovmg: {
     label:    'OVMG',
     color_hex: '#d96b3a',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovm: {
     label:    'OVM',
     color_hex: '#2c5d8a',
     // Tools = HTML editor + Email composer + Clients, combined (see CompanyView).
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovtv: {
     label:    'OVTV',
     color_hex: '#2f7d5f',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovf: {
     label:    'OVF',
     color_hex: '#b48a1e',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   amplify: {
     label:    'Amplify Artists',
     color_hex: '#7c3d8f',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   carbonsponge: {
     label:    'Carbon Sponge',
     color_hex: '#3a7d44',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovd: {
     label:    'OVD',
     color_hex: '#8a5c2c',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovv: {
     label:    'OVV',
     color_hex: '#5c2c8a',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
 };
 
@@ -71,6 +71,7 @@ export const COMPANY_META = {
 export const COMPANY_SUBTAB_LABELS = {
   contacts:     'Contacts',
   activities:   'Activities',
+  documents:    'Documents',
   tasks:        'Tasks',
   kanban:       'Kanban',
   opportunities:'Opportunities',
