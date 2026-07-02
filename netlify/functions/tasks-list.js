@@ -47,6 +47,11 @@ export const handler = async (event) => {
       t.relatedProjectIds   = Array.isArray(t.relatedProjects) ? t.relatedProjects : (t.relatedProjects ? [t.relatedProjects] : []);
       t.relatedProjectNames = resolve(t.relatedProjects, projectNames);
 
+      // Contact link (raw record IDs + resolved names) — powers the CRM's
+      // per-contact task list. 'Contact' is a linked field on Master Action Board.
+      t.contactIds   = r.fields['Contact'] || [];
+      t.contactNames = resolve(r.fields['Contact'], contactNames);
+
       // Opportunity + Client links (raw record IDs for edit-form selection)
       t.opportunityIds = r.fields['Opportunity'] || [];
       t.clientIds      = r.fields['Client']      || [];

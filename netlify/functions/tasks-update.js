@@ -12,7 +12,7 @@ export const handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
     const { id, task, status, priority, owner, dueDate, dealCategory, taskType, entity, type,
-            relatedProjectIds, opportunityIds, clientIds, updateNote } = body;
+            contactIds, relatedProjectIds, opportunityIds, clientIds, updateNote } = body;
     if (!id) return err(400, 'id is required');
 
     const update = {};
@@ -39,6 +39,7 @@ export const handler = async (event) => {
 
     const fields = toAirtableFields(update, TASKS_MAP);
     // Linked-record fields (arrays of record IDs). Passing [] clears the link.
+    if (contactIds        !== undefined) fields['Contact']         = Array.isArray(contactIds)        ? contactIds        : [];
     if (relatedProjectIds !== undefined) fields['Related Project'] = Array.isArray(relatedProjectIds) ? relatedProjectIds : [];
     if (opportunityIds    !== undefined) fields['Opportunity']     = Array.isArray(opportunityIds)    ? opportunityIds    : [];
     if (clientIds         !== undefined) fields['Client']          = Array.isArray(clientIds)         ? clientIds         : [];

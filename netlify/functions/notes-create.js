@@ -1,8 +1,22 @@
-import { airtableCreate, toAirtableFields, NOTES_MAP } from './_airtable.js';
+// notes-create — creates a contact "note" (typed, voice, or logged-contact
+// note). As of 2026-07 these are stored as rows in the shared Activities
+// table (Contact-linked, Company optional) rather than a separate "Notes"
+// table, which never existed in Airtable and caused every save here to fail
+// with a 403 "model not found" error. ACTIVITIES_MAP below is a local copy
+// of activities-create.js's field map so this file has no import-order
+// dependency on that one.
+import { airtableCreate, toAirtableFields } from './_airtable.js';
 import { ok, err, CORS } from './_notion.js';
 import { requireAuth } from './_auth.js';
 
-const TABLE = () => process.env.AIRTABLE_TABLE_NOTES || 'Notes';
+const TABLE = () => process.env.AIRTABLE_TABLE_ACTIVITIES || 'Activities';
+
+const ACTIVITIES_MAP = {
+  title:   'Title',
+  body:    'Body',
+  summary: 'AI Summary',
+  type:    'Type',
+};
 
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
@@ -18,10 +32,13 @@ export const handler = async (event) => {
       body:    noteBody  || '',
       summary: summary   || '',
       type:    type      || 'Note',
-    }, NOTES_MAP);
+    }, ACTIVITIES_MAP);
 
-    // Store the contact's Airtable record ID as a plain-text link
-    if (contactId) fields['Linked Contact ID'] = contactId;
+    fields['Date'] = new Date().toISOString().slice(0, 10);
+    // Contact is a linked-record field on Activities — must be an array of
+    // record IDs, not a plain-text ID like the old (nonexistent) field name
+    // "Linked Contact ID" this used to write to.
+    if (contactId) fields['Contact'] = [contactId];
 
     const record = await airtableCreate(TABLE(), fields);
     return ok({ id: record.id, created: true });

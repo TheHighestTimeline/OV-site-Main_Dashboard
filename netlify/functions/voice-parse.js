@@ -156,12 +156,70 @@ vague summaries; a rambling memo should still yield structured entries wherever 
 
   if (section === 'contact-note') {
     const contactName = ctx?.contactName || 'this contact';
-    return `You are an AI assistant logging a voice note about ${contactName}.
-Return:
+    return `You are an AI assistant logging a voice note about ${contactName} in a CRM. Today is ${today}.
+The user just spoke a note after (or about) an interaction with this contact. Capture the note AND pull
+out any follow-up actions they mentioned or clearly implied ("I need to send the deck", "circle back next
+week", "remind me to call Friday"). Convert relative dates to absolute YYYY-MM-DD based on today.
+
+Return a JSON object with this exact shape (use an empty array / null when nothing applies - never omit a key):
 {
   "summary": "one sentence summary of the note",
-  "title": "short title for the note (5 words max)"
+  "title": "short title for the note (5 words max)",
+  "tasks": [
+    { "task": "<concrete action, imperative>", "dueDate": "YYYY-MM-DD or null",
+      "priority": "High|Medium|Low", "taskType": "Task|Reminder" }
+  ],
+  "nextAction": "<the single most important next move in a few words, or null>",
+  "nextActionDate": "YYYY-MM-DD or null"
+}
+
+Use "Reminder" as taskType for time-based nudges ("remind me to...", "follow up on...") and "Task" for
+concrete deliverables. Only include tasks that were actually expressed - do not invent busywork.`;
+  }
+
+  if (section === 'contact-suggest') {
+    const contactName = ctx?.contactName || 'this contact';
+    return `You are a relationship-management strategist for OneVibe, a media company. Today is ${today}.
+Given a CRM contact and their recent notes/activity, recommend the single best next move.
+Contact + history are provided in the transcript field as JSON.
+
+Return a JSON object with this exact shape (never omit a key):
+{
+  "summary": "2-3 sentence synthesis of where this relationship stands",
+  "nextAction": "the concrete next move in a few words",
+  "nextActionDate": "YYYY-MM-DD (a sensible target based on urgency/staleness)",
+  "reasoning": "one sentence on why this is the right next step for ${contactName}"
 }`;
+  }
+
+  if (section === 'contact-draft') {
+    const contactName = ctx?.contactName || 'this contact';
+    return `You are drafting a warm, concise follow-up message from a OneVibe partner to ${contactName}. Today is ${today}.
+The contact + recent notes/activity are provided in the transcript field as JSON. Write a ready-to-send
+message that references the relationship context naturally, has a clear ask or next step, and sounds human
+(not templated). Keep it under 120 words. ${ctx?.channel === 'text' ? 'Make it a short SMS/DM - 2-3 sentences, no subject line.' : 'Format as an email with a subject line.'}
+
+Return a JSON object with this exact shape:
+{
+  "subject": "${ctx?.channel === 'text' ? 'null (no subject for texts)' : 'a short email subject line'}",
+  "message": "the full message body"
+}`;
+  }
+
+  if (section === 'contact-prioritize') {
+    return `You are a business-development chief of staff for OneVibe. Today is ${today}.
+You are given a list of CRM contacts (with last-contacted staleness, status, next action, and a one-line
+note snippet) in the transcript field as JSON. Rank who the user should reach out to today and why.
+
+Return a JSON object with this exact shape:
+{
+  "ranked": [
+    { "contactId": "<id from the input>", "name": "<name>",
+      "reason": "one sentence on why they're a priority now",
+      "suggestedAction": "the concrete move (call, email, send X)" }
+  ]
+}
+Return at most 8, most urgent first. Weigh staleness, Active status, and overdue next-action dates.`;
   }
 
   return `You are an AI assistant for a media company internal dashboard. Today is ${today}.

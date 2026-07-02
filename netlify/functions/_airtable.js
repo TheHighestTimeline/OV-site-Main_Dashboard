@@ -275,6 +275,7 @@ export const TASKS_MAP = {
   notes:           'Description',
   entity:          'Entity',          // singleSelect -> drives company tabs
   type:            'Type',            // singleSelect Internal/External
+  taskType:        'Task Type',       // singleSelect Task/Reminder - distinguishes a to-do from a reminder
   owner:           'Assigned To',     // linked -> Contacts (recordIds)
   relatedProjects: 'Related Project', // linked -> Projects  (recordIds)
 };
@@ -334,9 +335,15 @@ export const FINANCIAL_MAP = {
   currentAmount: 'Current Amount',
 };
 
+// NOTES_MAP - as of 2026-07, "notes" are stored as records in the shared
+// Activities table (there is no separate "Notes" table in Airtable; the
+// notes-*.js functions used to point at a nonexistent 'Notes' table, which
+// is why "Add note" was failing with a 403 "model not found" error). Body
+// maps to the Activities table's 'Body' field, not 'Notes' - Activities has
+// no field literally named 'Notes'.
 export const NOTES_MAP = {
   title:   'Title',
-  body:    'Notes',
+  body:    'Body',
   summary: 'AI Summary',
   type:    'Type',
 };
