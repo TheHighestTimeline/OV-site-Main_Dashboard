@@ -77,6 +77,16 @@ export const createNote  = data         => req('notes-create',  { method: 'POST'
 export const updateNote  = (id, data)   => req('notes-update',  { method: 'PATCH', body: JSON.stringify({ id, ...data }) });
 export const deleteNote  = id           => req('notes-delete',  { method: 'POST',  body: JSON.stringify({ id }) });
 
+// Companies (entity master list — Entity Code/Type/Parent Company/Subject Descriptor)
+export const getCompanies = () => req('companies-list');
+
+// Activities (contact/company interaction timeline — calls, notes, meetings,
+// voice notes, transcripts. Distinct from the older per-contact Notes above:
+// an Activity links to exactly one Company, so it can answer "what happened
+// with Carbon Sponge" even though the Contact also works with OVMG.)
+export const getActivities    = (companyId) => req(`activities-list?companyId=${encodeURIComponent(companyId)}`);
+export const createActivity   = data        => req('activities-create', { method: 'POST', body: JSON.stringify(data) });
+
 // Goals
 export const getGoals   = ()   => req('goals-list');
 export const createGoal = data => req('goals-create', { method: 'POST', body: JSON.stringify(data) });
