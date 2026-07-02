@@ -44,6 +44,14 @@ export const handler = async (event) => {
       c.companyIds = r.fields['Companies'] || [];
       c.companyNames = c.companyIds.map(id => companyNames[id]).filter(Boolean);
 
+      // Bridge to the snake_case key the frontend already reads/writes
+      // (see Contacts.jsx handleLogContact). daysSinceContact drives the
+      // amber/red staleness badge — null/undefined means never contacted.
+      c.last_contacted_at = c.lastContactedAt || null;
+      c.daysSinceContact = c.last_contacted_at
+        ? Math.floor((Date.now() - new Date(c.last_contacted_at).getTime()) / 86400000)
+        : null;
+
       return c;
     });
 

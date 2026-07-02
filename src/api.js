@@ -91,6 +91,7 @@ export const createActivity   = data        => req('activities-create', { method
 // + the Drive link only — Airtable attachment URLs expire, so we never rely
 // on Airtable to host the file itself).
 export const getDocuments    = (companyId) => req(`documents-list?companyId=${encodeURIComponent(companyId)}`);
+export const getDocumentsForContact = (contactId) => req(`documents-list?contactId=${encodeURIComponent(contactId)}`);
 export const createDocument  = data         => req('documents-create', { method: 'POST', body: JSON.stringify(data) });
 
 // Goals

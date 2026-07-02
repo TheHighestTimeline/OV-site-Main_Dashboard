@@ -23,7 +23,7 @@ export const handler = async (event, context) => {
     const userPrompt   = `Transcript: "${transcript}"\n\nReturn only valid JSON, no markdown, no explanation.`;
 
     const response = await anthropic.messages.create({
-      model:      'claude-sonnet-4-6',
+      model:      'claude-sonnet-5',
       max_tokens: 1024,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userPrompt }],
@@ -34,7 +34,7 @@ export const handler = async (event, context) => {
       const u = await getUser(event);
       await logUsage({
         event, service: 'anthropic', surface: 'voice-parse',
-        operation: 'messages.create', model: 'claude-sonnet-4-6',
+        operation: 'messages.create', model: 'claude-sonnet-5',
         ...tokensFromAnthropic(response),
         user: u,
       });
@@ -118,6 +118,40 @@ Return:
   }
 }
 Use empty string for any field not mentioned.`;
+  }
+
+  if (section === 'audio-dump') {
+    return `You are an AI assistant for a media company internal dashboard, reviewing a senior partner's
+raw voice memo ("audio dump") so it can be triaged into concrete CRM/task actions. Today is ${today}.
+Active tasks (JSON): ${tasksJSON}
+Known contacts (JSON): ${contactsJSON}
+
+Extract every distinct actionable item you can find. Return a JSON object with this exact shape
+(use empty arrays for any category with nothing to report — never omit a key):
+{
+  "summary": "1-2 sentence summary of the whole memo",
+  "taskUpdates": [
+    { "taskId": "<id or null if no confident match>", "taskTitle": "<matched task name>",
+      "newStatus": "<Done|In Progress|Not Started|On Hold|Waiting On Response|Needs Attention|Submitted|Canceled|null>",
+      "note": "<what was said about this task>", "confidence": 0.0-1.0 }
+  ],
+  "newTasks": [
+    { "task": "<description>", "owner": "<name if mentioned>", "priority": "High|Medium|Low", "dueDate": "YYYY-MM-DD or null" }
+  ],
+  "newContacts": [
+    { "name": "...", "company": "...", "role": "...", "email": "...", "phone": "...", "type": "External|Internal" }
+  ],
+  "contactUpdates": [
+    { "contactId": "<id or null if no confident match>", "name": "<matched contact name>", "note": "<what was said>" }
+  ],
+  "notes": [
+    { "title": "<short title, 5 words max>", "body": "<full note text>" }
+  ]
+}
+
+Only match an existing taskId/contactId when you are confident — otherwise leave it null and let the
+new-task/new-contact arrays or a plain note carry the content. Prefer specific, actionable items over
+vague summaries; a rambling memo should still yield structured entries wherever intent is clear.`;
   }
 
   if (section === 'contact-note') {

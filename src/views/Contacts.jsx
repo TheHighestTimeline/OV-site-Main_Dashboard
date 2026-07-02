@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { C, SERIF, SANS, MONO, DB, RELATES, stBg, stFg, fmtR, notionUrl } from '../constants.js';
 import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic } from '../components/UI.jsx';
 import { getContacts, createContact, updateContact, getNotes, createNote, updateNote, deleteNote, parseVoice,
-         getAirtableSchema, airtableRecordUrl } from '../api.js';
+         getAirtableSchema, airtableRecordUrl, getDocumentsForContact, createDocument } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import { companyNameMatchesSlug } from '../constants/roles.js';
 
@@ -17,6 +17,30 @@ const SLUG_TO_COMPANY_NAME = {
   ovmg: 'OVMG', ovm: 'OVM', ovtv: 'OVTV', ovf: 'OVF',
   amplify: 'Amplify Artists', carbonsponge: 'Carbon Sponge', ovd: 'OVD', ovv: 'OVV',
 };
+
+// Graduated "days since contact" badge — per COO Operating Manual Part 3:
+// "'Never' is banned for Active relationships" / amber past 14 days, red
+// past 30. daysSinceContact is computed server-side in contacts-list.js;
+// this falls back to computing it client-side if that's missing.
+function daysSince(c) {
+  if (c.daysSinceContact != null) return c.daysSinceContact;
+  if (!c.last_contacted_at) return null;
+  return Math.floor((Date.now() - new Date(c.last_contacted_at).getTime()) / 86400000);
+}
+function ContactBadge({ c, compact = false }) {
+  const days = daysSince(c);
+  if (days == null) {
+    return <span style={{ color: C.red, fontWeight: 600, fontSize: compact ? 11 : 13 }}>Never ⚑</span>;
+  }
+  const stale = days >= 30 ? 'red' : days >= 14 ? 'amber' : 'ok';
+  const color = stale === 'red' ? C.red : stale === 'amber' ? C.yel : C.ink5;
+  const label = days === 0 ? 'Today' : days === 1 ? '1 day ago' : `${days} days ago`;
+  return (
+    <span style={{ color, fontWeight: stale === 'ok' ? 400 : 600, fontSize: compact ? 11 : 13, whiteSpace: 'nowrap' }}>
+      {fmtR(c.last_contacted_at)} {stale !== 'ok' && `· ${label}`}{stale === 'red' && ' ⚑'}
+    </span>
+  );
+}
 
 export default function Contacts({ user, showToast, openOv, closeOv, companyFilter = null }) {
   const isMobile = useIsMobile();
@@ -211,6 +235,39 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
     const [logSaving,   setLogSaving]   = useState(false);
     const [localC,      setLocalC]      = useState(c);
 
+    // Documents linked to this contact — per-contact links, not just the
+    // company-level Documents tab. Backed by the same Documents table.
+    const [docs,        setDocs]        = useState([]);
+    const [docsLoading, setDocsLoading] = useState(true);
+    const [showDocForm, setShowDocForm] = useState(false);
+    const [docName,     setDocName]     = useState('');
+    const [docUrl,      setDocUrl]      = useState('');
+    const [docSaving,   setDocSaving]   = useState(false);
+
+    const loadDocs = useCallback(() => {
+      setDocsLoading(true);
+      getDocumentsForContact(localC.id)
+        .then(setDocs)
+        .catch(() => {})
+        .finally(() => setDocsLoading(false));
+    }, [localC.id]);
+
+    useEffect(() => { loadDocs(); }, [loadDocs]);
+
+    const saveDoc = async () => {
+      if (!docName.trim() || !docUrl.trim()) { showToast('Name and link are both required'); return; }
+      setDocSaving(true);
+      try {
+        await createDocument({ name: docName.trim(), driveLink: docUrl.trim(), contactIds: [localC.id] });
+        showToast('Document linked ✓');
+        setDocName(''); setDocUrl(''); setShowDocForm(false);
+        await loadDocs();
+      } catch (e) {
+        showToast('Failed: ' + e.message);
+      }
+      setDocSaving(false);
+    };
+
     const handleLogContact = async () => {
       setLogSaving(true);
       const now = new Date().toISOString();
@@ -265,7 +322,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
             </button>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: (typeof window !== 'undefined' && window.innerWidth < 768) ? '1fr' : '1fr 1fr', gap: 12 }}>
-            {[['Email', localC.email], ['Phone', localC.phone], ['Website', localC.website], ['Status', localC.status], ['Type', localC.type]].map(([l, v]) => (
+            {[['Email', localC.email], ['Phone', localC.phone], ['Website', localC.website], ['Status', localC.status], ['Type', localC.type], ['Owner', localC.owner], ['Source', localC.source]].map(([l, v]) => (
               <div key={l}>
                 <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>{l}</div>
                 <div style={{ fontSize: 13, color: C.ink8 }}>{v || '—'}</div>
@@ -273,8 +330,12 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
             ))}
             <div>
               <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Last contacted</div>
-              <div style={{ fontSize: 13, color: localC.last_contacted_at ? C.ink8 : C.ink3 }}>
-                {localC.last_contacted_at ? fmtR(localC.last_contacted_at) : 'Never'}
+              <div style={{ fontSize: 13 }}><ContactBadge c={localC} /></div>
+            </div>
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Next action</div>
+              <div style={{ fontSize: 13, color: C.ink8 }}>
+                {localC.nextAction ? `${localC.nextAction}${localC.nextActionDate ? ' · ' + fmtR(localC.nextActionDate) : ''}` : '—'}
               </div>
             </div>
             <div style={{ gridColumn: '1/-1' }}>
@@ -284,6 +345,46 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Documents linked to this contact */}
+        <div style={{ padding: 14, background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: docsLoading || docs.length || showDocForm ? 10 : 0 }}>
+            <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3 }}>Documents</div>
+            <button
+              onClick={() => setShowDocForm(v => !v)}
+              style={{ background: 'none', border: `1px solid ${C.acc}`, borderRadius: 6, padding: '3px 9px', fontFamily: MONO, fontSize: 9, letterSpacing: '.08em', textTransform: 'uppercase', color: C.acc, cursor: 'pointer' }}
+            >
+              {showDocForm ? 'Cancel' : '+ Link doc'}
+            </button>
+          </div>
+
+          {showDocForm && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: docs.length ? 10 : 0 }}>
+              <Inp value={docName} onChange={setDocName} placeholder="Name this document…" />
+              <Inp value={docUrl} onChange={setDocUrl} placeholder="https://drive.google.com/…" />
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <Btn onClick={saveDoc} disabled={docSaving}>{docSaving ? 'Saving…' : 'Save link'}</Btn>
+              </div>
+            </div>
+          )}
+
+          {docsLoading ? (
+            <div style={{ fontSize: 12, color: C.ink3 }}>Loading…</div>
+          ) : docs.length === 0 ? (
+            !showDocForm && <div style={{ fontSize: 12, color: C.ink3, fontStyle: 'italic' }}>No documents linked yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {docs.map(d => (
+                <a key={d.id} href={d.driveLink} target="_blank" rel="noopener noreferrer"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none', padding: '7px 10px', background: C.bg, border: `1px solid ${C.cr2}`, borderRadius: 7 }}>
+                  <span style={{ fontSize: 13 }}>⎘</span>
+                  <span style={{ fontSize: 13, color: C.ink8, fontFamily: SERIF }}>{d.name}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: C.ink3 }}>↗</span>
+                </a>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Log Contact form */}
@@ -375,7 +476,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, gap: 8 }}>
                     <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 14 }}>{n.title}</span>
-                    <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, whiteSpace: 'nowrap' }}>{n.type} · {fmtR(n.createdTime)}</span>
+                    <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, whiteSpace: 'nowrap' }}>{n.type} · <b style={{ color: C.ink5 }}>{fmtR(n.createdTime)}</b></span>
                   </div>
                   {n.summary && <div style={{ fontStyle: 'italic', color: C.ink5, fontSize: 12, marginBottom: 5 }}>{n.summary}</div>}
                   <div style={{ fontSize: 13, color: C.ink7, lineHeight: 1.5, marginBottom: 8 }}>{n.body}</div>
@@ -409,6 +510,8 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
       email: c.email || '', phone: c.phone || '', website: c.website || '',
       role: c.role || '', status: c.status || 'Active', type: c.type || 'External',
       relatesTo: Array.isArray(c.relatesTo) ? c.relatesTo : [],
+      owner: c.owner || '', nextAction: c.nextAction || '', nextActionDate: c.nextActionDate || '',
+      source: c.source || '',
     });
     const fld = k => e => setF(p => ({ ...p, [k]: e.target.value }));
     const toggleRel = v => setF(p => ({ ...p, relatesTo: p.relatesTo.includes(v) ? p.relatesTo.filter(x => x !== v) : [...p.relatesTo, v] }));
@@ -448,6 +551,14 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
               <option>External</option><option>Internal</option>
             </Sel>
           </FR>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: (typeof window !== 'undefined' && window.innerWidth < 768) ? '1fr' : '1fr 1fr', gap: 10 }}>
+          <FR label="Owner"><Inp value={f.owner} onChange={fld('owner')} placeholder="Who owns this relationship" /></FR>
+          <FR label="Source"><Inp value={f.source} onChange={fld('source')} placeholder="How this contact came in" /></FR>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: (typeof window !== 'undefined' && window.innerWidth < 768) ? '1fr' : '1fr 1fr', gap: 10 }}>
+          <FR label="Next action"><Inp value={f.nextAction} onChange={fld('nextAction')} placeholder="What happens next" /></FR>
+          <FR label="Next action date"><Inp type="date" value={f.nextActionDate} onChange={fld('nextActionDate')} /></FR>
         </div>
         {/* Companies — ties this contact to one or more deal categories.
             This is what surfaces the contact on a company page. */}
@@ -631,7 +742,6 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
             </thead>
             <tbody>
               {filtered.map(c => {
-                const needsAttention = !c.last_contacted_at || (Date.now() - new Date(c.last_contacted_at).getTime()) > 30 * 86400000;
                 return (
                   <tr key={c.id} onClick={() => openDrawer(c)} style={{ cursor: 'pointer' }}
                     onMouseEnter={e => e.currentTarget.style.background = C.cr1}
@@ -646,8 +756,8 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}><div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>{(c.relatesTo || []).map(r => <Tag key={r} bg="transparent" fg={C.ink5}>{r}</Tag>)}</div></td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.email || '—'}</td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.phone || '—'}</td>
-                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: needsAttention ? C.yel : C.ink5, fontWeight: needsAttention ? 600 : 400, whiteSpace: 'nowrap' }}>
-                      {c.last_contacted_at ? fmtR(c.last_contacted_at) : <span style={{ color: C.red, fontWeight: 600 }}>Never ⚑</span>}
+                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, whiteSpace: 'nowrap' }}>
+                      <ContactBadge c={c} compact />
                     </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}>{c.status && <Tag bg={stBg(c.status)} fg={stFg(c.status)}>{c.status}</Tag>}</td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}>{c.type && <Tag bg="transparent" fg={C.ink5}>{c.type}</Tag>}</td>

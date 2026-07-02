@@ -11,17 +11,21 @@ export const handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { name, role, email, phone, status, type, relatesTo } = body;
+    const { name, role, email, phone, status, type, relatesTo, owner, nextAction, nextActionDate, source } = body;
     if (!name) return err(400, 'name is required');
 
     const fields = toAirtableFields({
       name,
-      role:      role      || '',
-      email:     email     || '',
-      phone:     phone     || '',
-      status:    status    || 'Active',
-      type:      type      || 'External',
-      relatesTo: Array.isArray(relatesTo) ? relatesTo : [],
+      role:           role           || '',
+      email:          email          || '',
+      phone:          phone          || '',
+      status:         status         || 'Active',
+      type:           type           || 'External',
+      relatesTo:      Array.isArray(relatesTo) ? relatesTo : [],
+      owner:          owner          || '',
+      nextAction:     nextAction     || '',
+      nextActionDate: nextActionDate || '',
+      source:         source         || '',
     }, CONTACTS_MAP);
 
     const record = await airtableCreate(TABLE(), fields);

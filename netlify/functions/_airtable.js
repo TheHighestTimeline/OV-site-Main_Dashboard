@@ -251,8 +251,13 @@ export const CONTACTS_MAP = {
   phone:    'Phone',
   linkedin: 'LinkedIn',
   type:     'Type',
-  status:   'Status',       // Active / Benched / Unknown — 422-stripped if not in table
+  status:   'Status',       // Active / Benched / Unknown — added to Airtable 2026-07 (was previously silently no-op-ing)
   notes:    'Notes',
+  lastContactedAt: 'Last Contacted',   // added 2026-07 — fixes the Log Contact button, which was never actually persisting
+  owner:           'Owner',
+  nextAction:      'Next Action',
+  nextActionDate:  'Next Action Date',
+  source:          'Source',
   // updatedAt comes from Last Modified Time (auto-populated by fromAirtableRecord)
 };
 

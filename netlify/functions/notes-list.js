@@ -20,10 +20,15 @@ export const handler = async (event) => {
       pageSize: 50,
     });
 
-    const notes = records.map(r => ({
-      ...fromAirtableRecord(r, NOTES_MAP),
-      createdTime: r.createdTime || null,
-    }));
+    const notes = records
+      .map(r => ({
+        ...fromAirtableRecord(r, NOTES_MAP),
+        createdTime: r.createdTime || null,
+      }))
+      // Newest first, per COO Operating Manual Part 3 ("Activity timeline —
+      // render notes newest-first"). Airtable's list API doesn't support
+      // sorting by the built-in createdTime meta field, so sort client-side.
+      .sort((a, b) => new Date(b.createdTime || 0) - new Date(a.createdTime || 0));
 
     return ok(notes);
   } catch (e) {
