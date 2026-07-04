@@ -5,6 +5,7 @@ import { getContacts, createContact, parseVoice, getAirtableSchema } from '../ap
 import useIsMobile from '../hooks/useIsMobile.js';
 import { companyNameMatchesSlug } from '../constants/roles.js';
 import ContactProfile from './ContactProfile.jsx';
+import CompanySnapshot from './CompanySnapshot.jsx';
 
 const COMPANIES = ['All', 'OVMG', 'OVM', 'OVTV', 'OVF', 'Amplify Artists', 'CarbonSponge', 'OVD', 'OVV'];
 const COMPANY_CHIP_SLUG = {
@@ -62,6 +63,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
   const [filtersOpen,      setFiltersOpen]      = useState(false);
   const [followupOnly,     setFollowupOnly]     = useState(false);
   const [activeContact,    setActiveContact]    = useState(null);   // opens full-screen profile
+  const [activeCompany,    setActiveCompany]    = useState(null);   // { id, name } → opens CompanySnapshot
   const [prioritizing,     setPrioritizing]     = useState(false);
   const [priorityResult,   setPriorityResult]   = useState(null);   // { ranked: [...] } | 'error'
 
@@ -311,8 +313,13 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
                       {flag && <span title="Needs follow-up" style={{ color: C.red, marginRight: 6 }}>⚑</span>}{c.name}
                     </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>
-                      {(c.companyNames || []).length
-                        ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>{c.companyNames.map(n => <Tag key={n} bg={C.accS} fg={C.accD}>{n}</Tag>)}</div>
+                      {(c.companies || []).filter(co => co.id).length
+                        ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>{c.companies.filter(co => co.id).map(co => (
+                            <button key={co.id} onClick={e => { e.stopPropagation(); setActiveCompany({ id: co.id, name: co.name || 'Company' }); }} title="Open company snapshot"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontFamily: SANS, cursor: 'pointer', background: C.accS, color: C.accD, border: `1px solid #ecd1bc` }}>
+                              {co.name || 'Company'} <span style={{ fontSize: 9, opacity: .7 }}>↗</span>
+                            </button>
+                          ))}</div>
                         : (c.company || '—')}
                     </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>{c.role || '—'}</td>
@@ -338,6 +345,16 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
           onClose={() => setActiveContact(null)}
           showToast={showToast}
           reloadContacts={loadContacts}
+        />
+      )}
+
+      {/* Company snapshot (opened from a company chip in the table) */}
+      {activeCompany && (
+        <CompanySnapshot
+          companyId={activeCompany.id}
+          companyName={activeCompany.name}
+          onClose={() => setActiveCompany(null)}
+          showToast={showToast}
         />
       )}
 

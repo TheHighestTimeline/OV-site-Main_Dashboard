@@ -24,7 +24,7 @@ export const handler = async (event) => {
     const body = JSON.parse(event.body || '{}');
     const {
       name, type, driveLink, signedDate, version, tags,
-      contactIds, companyIds, opportunityIds,
+      contactIds, companyIds, opportunityIds, folderIds,
     } = body;
 
     if (!name) return err(400, 'name is required');
@@ -42,6 +42,7 @@ export const handler = async (event) => {
     if (Array.isArray(contactIds) && contactIds.length)         fields['Contact']          = contactIds;
     if (Array.isArray(companyIds) && companyIds.length)         fields['Company']          = companyIds;
     if (Array.isArray(opportunityIds) && opportunityIds.length) fields['Deal/Opportunity'] = opportunityIds;
+    if (Array.isArray(folderIds) && folderIds.length)           fields['Folder']           = folderIds;
 
     const record = await airtableCreate(TABLE(), fields);
     return ok({ id: record.id, name });

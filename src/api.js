@@ -93,6 +93,17 @@ export const createActivity   = data        => req('activities-create', { method
 export const getDocuments    = (companyId) => req(`documents-list?companyId=${encodeURIComponent(companyId)}`);
 export const getDocumentsForContact = (contactId) => req(`documents-list?contactId=${encodeURIComponent(contactId)}`);
 export const createDocument  = data         => req('documents-create', { method: 'POST', body: JSON.stringify(data) });
+export const updateDocument  = (id, data)   => req('documents-update', { method: 'PATCH', body: JSON.stringify({ id, ...data }) });
+
+// Folders (Drive-folder registry — documents get filed into these). A folder is
+// scoped to a company (company-shared) and/or a single contact (per-contact).
+export const getFoldersForCompany = (companyId) => req(`folders-list?companyId=${encodeURIComponent(companyId)}`);
+export const getFoldersForContact = (contactId) => req(`folders-list?contactId=${encodeURIComponent(contactId)}`);
+export const createFolder    = data         => req('folders-create', { method: 'POST', body: JSON.stringify(data) });
+
+// Company drill-down — one call returns notes, documents (+folders), open tasks,
+// people, and opportunities for the "Company Snapshot" modal opened from a contact.
+export const getCompanyDetail = (companyId) => req(`company-detail?companyId=${encodeURIComponent(companyId)}`);
 
 // Goals
 export const getGoals   = ()   => req('goals-list');

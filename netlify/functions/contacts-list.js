@@ -43,6 +43,10 @@ export const handler = async (event) => {
       // owner/project names.
       c.companyIds = r.fields['Companies'] || [];
       c.companyNames = c.companyIds.map(id => companyNames[id]).filter(Boolean);
+      // Index-aligned {id,name} pairs (companyNames above is filtered, so it
+      // can't be safely zipped with companyIds). Used to open the CompanySnapshot
+      // modal from clickable company chips (contact profile + Contacts list).
+      c.companies = c.companyIds.map(id => ({ id, name: companyNames[id] || '' }));
 
       // Bridge to the snake_case key the frontend already reads/writes
       // (see Contacts.jsx handleLogContact). daysSinceContact drives the

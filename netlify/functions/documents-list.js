@@ -31,6 +31,7 @@ export const handler = async (event) => {
       d.contactIds      = r.fields['Contact'] || [];
       d.companyIds      = r.fields['Company'] || [];
       d.opportunityIds  = r.fields['Deal/Opportunity'] || [];
+      d.folderIds       = r.fields['Folder'] || [];
       return d;
     });
 
