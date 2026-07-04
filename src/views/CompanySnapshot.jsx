@@ -42,6 +42,7 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
   const isMobile = useIsMobile();
   const [data, setData]   = useState(null);
   const [error, setError] = useState(null);
+  const [coTab, setCoTab] = useState('overview');
 
   useEffect(() => {
     const esc = e => { if (e.key === 'Escape') onClose(); };
@@ -115,6 +116,13 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
               {co.website && <a href={co.website} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 10, color: C.acc, textDecoration: 'none' }}>{hostLabel(co.website)} ↗</a>}
             </div>
           )}
+          {data && (
+            <div style={{ display: 'flex', gap: 2, marginTop: 14, borderBottom: `1px solid ${C.cr2}`, overflowX: 'auto' }}>
+              {[['overview', 'Overview'], ['documents', `Documents (${(data.documents || []).length})`], ['tasks', `Tasks (${(data.openTasks || []).length})`], ['people', `People (${(data.people || []).length})`], ['deals', `Deals (${(data.opportunities || []).length})`]].map(([id, label]) => (
+                <button key={id} onClick={() => setCoTab(id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '9px 13px', fontFamily: SANS, fontSize: 13, whiteSpace: 'nowrap', color: coTab === id ? C.ink9 : C.ink3, fontWeight: coTab === id ? 600 : 400, borderBottom: coTab === id ? `2px solid ${C.acc}` : '2px solid transparent', marginBottom: -1 }}>{label}</button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Body */}
@@ -129,8 +137,7 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
 
           {data && (
             <div>
-              {/* Notes */}
-              <Section title="Notes & summary">
+              {coTab === 'overview' && <Section title="Notes & summary">
                 {(co.notes?.summary || co.notes?.callsNotes || co.notes?.waitingOn) ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {co.notes.summary && <NoteBlock label="Summary" body={co.notes.summary} />}
@@ -153,10 +160,9 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                     ))}
                   </div>
                 )}
-              </Section>
+              </Section>}
 
-              {/* Documents */}
-              <Section title="Documents" count={(data.documents || []).length}>
+              {coTab === 'documents' && <Section title="Documents" count={(data.documents || []).length}>
                 {(data.documents || []).length === 0 ? <Empty>No documents linked to this company.</Empty> : (
                   <div>
                     {folderGroups.map(({ folder, docs }) => (
@@ -177,10 +183,9 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                     )}
                   </div>
                 )}
-              </Section>
+              </Section>}
 
-              {/* Open tasks */}
-              <Section title="Open tasks" count={(data.openTasks || []).length}>
+              {coTab === 'tasks' && <Section title="Open tasks" count={(data.openTasks || []).length}>
                 {(data.openTasks || []).length === 0 ? <Empty>No open tasks for this company.</Empty> : (
                   <div>
                     {data.openTasks.map(t => {
@@ -202,11 +207,9 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                     })}
                   </div>
                 )}
-              </Section>
+              </Section>}
 
-              {/* People + Opportunities side by side on desktop */}
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 18 }}>
-                <Section title="People" count={(data.people || []).length}>
+              {coTab === 'people' && <Section title="People" count={(data.people || []).length}>
                   {(data.people || []).length === 0 ? <Empty>No people linked.</Empty> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {data.people.map(p => (
@@ -217,9 +220,9 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                       ))}
                     </div>
                   )}
-                </Section>
+              </Section>}
 
-                <Section title="Opportunities" count={(data.opportunities || []).length}>
+              {coTab === 'deals' && <Section title="Opportunities" count={(data.opportunities || []).length}>
                   {(data.opportunities || []).length === 0 ? <Empty>No opportunities.</Empty> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {data.opportunities.map(o => (
@@ -234,8 +237,7 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                       ))}
                     </div>
                   )}
-                </Section>
-              </div>
+              </Section>}
             </div>
           )}
         </div>

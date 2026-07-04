@@ -9,7 +9,9 @@ const DOCUMENTS_MAP = {
   type:       'Type',
   driveLink:  'Drive Link',
   signedDate: 'Signed Date',
+  expires:    'Expiry Date',
   version:    'Version',
+  entity:     'Entity',
 };
 
 // Airtable attachment URLs expire after a few hours, so this table never
@@ -24,7 +26,7 @@ export const handler = async (event) => {
     const body = JSON.parse(event.body || '{}');
     const {
       name, type, driveLink, signedDate, version, tags,
-      contactIds, companyIds, opportunityIds, folderIds,
+      contactIds, companyIds, opportunityIds, folderIds, expires, entity,
     } = body;
 
     if (!name) return err(400, 'name is required');
@@ -35,7 +37,9 @@ export const handler = async (event) => {
       type:       type   || 'Other',
       driveLink,
       signedDate: signedDate || '',
+      expires:    expires    || '',
       version:    version    || '',
+      entity:     entity     || '',
     }, DOCUMENTS_MAP);
 
     if (Array.isArray(tags) && tags.length)                     fields['Tags']             = tags;

@@ -4,8 +4,9 @@ import { Tag, Btn, Inp, Sel, FR, VoiceMic, Spinner } from '../components/UI.jsx'
 import {
   getNotes, createNote, updateNote, deleteNote, updateContact, parseVoice,
   getDocumentsForContact, createDocument, updateDocument, getTasks, createTask, updateTask,
-  getFoldersForContact, getFoldersForCompany, createFolder,
-  airtableRecordUrl,
+  getFoldersForContact, getFoldersForCompany, createFolder, getActivitiesForContact,
+  getOpportunities, updateOpportunity, createOpportunity,
+  sendNcnda, airtableRecordUrl,
 } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import CompanySnapshot from './CompanySnapshot.jsx';
@@ -63,11 +64,13 @@ const textareaStyle = {
   fontFamily: SANS, fontSize: 14, lineHeight: 1.55, resize: 'vertical', outline: 'none',
 };
 
-export default function ContactProfile({ contact, contactTableId, onClose, showToast, reloadContacts }) {
+export default function ContactProfile({ contact, contactTableId, onClose, showToast, reloadContacts, allContacts = [], onOpenContactId, user }) {
+  const isAdmin = !!user?.isAdmin;
   const isMobile = useIsMobile();
   const [tab, setTab] = useState('overview');
   const [c, setC] = useState(contact);
   const [activeCompany, setActiveCompany] = useState(null); // { id, name } → opens CompanySnapshot
+  const [showBrief, setShowBrief] = useState(false);        // meeting-prep one-pager
 
   // Linked companies (record IDs + resolved names) that can open the snapshot modal.
   // Prefer the index-aligned `companies` pairs from the API; fall back to zipping
@@ -108,7 +111,9 @@ export default function ContactProfile({ contact, contactTableId, onClose, showT
 
   const TABS = [
     { id: 'overview', label: 'Overview' },
+    { id: 'timeline', label: 'Timeline' },
     { id: 'files',    label: `Files${docCount != null ? ` (${docCount})` : ''}` },
+    { id: 'deals',    label: 'Deals' },
     { id: 'notes',    label: `Notes${notes ? ` (${notes.length})` : ''}` },
     { id: 'tasks',    label: `Tasks${tasks ? ` (${openTaskCount})` : ''}` },
     { id: 'ai',       label: '✦ AI' },
@@ -146,6 +151,7 @@ export default function ContactProfile({ contact, contactTableId, onClose, showT
               </div>
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <Btn v="gho" onClick={() => setShowBrief(true)}>📋 Prep</Btn>
               {c.status && <Tag bg={stBg(c.status)} fg={stFg(c.status)}>{c.status}</Tag>}
               <StaleBadge c={c} />
             </div>
@@ -172,8 +178,10 @@ export default function ContactProfile({ contact, contactTableId, onClose, showT
 
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '16px' : '20px 26px 40px' }}>
-          {tab === 'overview' && <OverviewTab c={c} setC={setC} contactTableId={contactTableId} showToast={showToast} reloadContacts={reloadContacts} onLogged={loadNotes} />}
+          {tab === 'overview' && <OverviewTab c={c} setC={setC} contactTableId={contactTableId} showToast={showToast} reloadContacts={reloadContacts} onLogged={loadNotes} allContacts={allContacts} onOpenContactId={onOpenContactId} isAdmin={isAdmin} />}
+          {tab === 'timeline' && <TimelineTab c={c} notes={notes} />}
           {tab === 'files'    && <FilesTab c={c} showToast={showToast} onCount={setDocCount} />}
+          {tab === 'deals'    && <DealsTab c={c} showToast={showToast} isAdmin={isAdmin} />}
           {tab === 'notes'    && <NotesTab c={c} notes={notes} reload={loadNotes} reloadTasks={loadTasks} setC={setC} showToast={showToast} reloadContacts={reloadContacts} />}
           {tab === 'tasks'    && <TasksTab c={c} tasks={tasks} reload={loadTasks} showToast={showToast} />}
           {tab === 'ai'       && <AiTab c={c} notes={notes} setC={setC} showToast={showToast} reloadContacts={reloadContacts} reloadTasks={loadTasks} />}
@@ -188,17 +196,266 @@ export default function ContactProfile({ contact, contactTableId, onClose, showT
           showToast={showToast}
         />
       )}
+
+      {showBrief && <MeetingBrief c={c} tasks={tasks} notes={notes} onClose={() => setShowBrief(false)} />}
+    </div>
+  );
+}
+
+// ── Deals tab (linked Opportunities) ──────────────────────────────────────────
+const OPP_STAGES = ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Verbal commit', 'Structuring', 'Due diligence', 'Underwriting', 'Committed', 'Closed Won', 'Closed Lost', 'Active', 'Forming', 'Exploring', 'Prospect', 'Delivered', 'In build', 'Deposit pending'];
+function money(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v); if (Number.isNaN(n)) return String(v);
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+function DealsTab({ c, showToast, isAdmin }) {
+  const [opps, setOpps] = useState(null);
+  const [pool, setPool] = useState([]);
+  const [showLink, setShowLink] = useState(false);
+  const [linkQ, setLinkQ] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    getOpportunities().then(all => {
+      const mine = all.filter(o => (o.contactIds || []).includes(c.id));
+      setOpps(mine);
+      setPool(all.filter(o => !(o.contactIds || []).includes(c.id)));
+    }).catch(() => setOpps([]));
+  }, [c.id]);
+  useEffect(() => { load(); }, [load]);
+
+  const changeStage = async (o, stage) => { try { await updateOpportunity(o.id, { stage }); showToast('Stage → ' + stage); load(); } catch (e) { showToast('Failed: ' + e.message); } };
+  const editDataRoom = async (o) => { const url = window.prompt('Data-room URL for this deal:', o.dataRoom || ''); if (url === null) return; try { await updateOpportunity(o.id, { dataRoom: url }); showToast('Data room saved ✓'); load(); } catch (e) { showToast('Failed: ' + e.message); } };
+  const linkOpp = async (o) => { setBusy(true); try { await updateOpportunity(o.id, { contactIds: [...(o.contactIds || []), c.id] }); showToast('Deal linked ✓'); setShowLink(false); setLinkQ(''); load(); } catch (e) { showToast('Failed: ' + e.message); } setBusy(false); };
+  const unlink = async (o) => { if (!window.confirm('Unlink this deal from the contact?')) return; try { await updateOpportunity(o.id, { contactIds: (o.contactIds || []).filter(id => id !== c.id) }); showToast('Unlinked'); load(); } catch (e) { showToast('Failed: ' + e.message); } };
+  const newDeal = async () => { const name = window.prompt('New deal name:'); if (!name) return; setBusy(true); try { await createOpportunity({ name: name.trim(), contactIds: [c.id], entity: (c.relatesTo || [])[0] || undefined }); showToast('Deal created ✓'); load(); } catch (e) { showToast('Failed: ' + e.message); } setBusy(false); };
+
+  const selStyle = { border: `1px solid ${C.cr3}`, background: C.bg2, borderRadius: 7, padding: '4px 8px', fontFamily: SANS, fontSize: 12, color: C.ink8, outline: 'none', cursor: 'pointer' };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginBottom: 14 }}>
+        <Btn v="gho" onClick={() => setShowLink(v => !v)}>🔗 {showLink ? 'Cancel' : 'Link existing'}</Btn>
+        <Btn onClick={newDeal} disabled={busy}>+ New deal</Btn>
+      </div>
+
+      {showLink && (
+        <Card style={{ background: C.bg2 }}>
+          <SectionLabel>Link an existing deal to {c.name}</SectionLabel>
+          <Inp value={linkQ} onChange={e => setLinkQ(e.target.value)} placeholder="Search deals…" />
+          <div style={{ maxHeight: 240, overflowY: 'auto', marginTop: 8 }}>
+            {pool.filter(o => !linkQ || (o.name || '').toLowerCase().includes(linkQ.toLowerCase())).slice(0, 30).map(o => (
+              <div key={o.id} onClick={() => linkOpp(o)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', border: `1px solid ${C.cr2}`, borderRadius: 8, marginBottom: 6, cursor: 'pointer', background: C.bg }}>
+                <span style={{ flex: 1, fontFamily: SERIF, fontSize: 13, color: C.ink9 }}>{o.name}</span>
+                {o.stage && <Tag bg="transparent" fg={C.ink5}>{o.stage}</Tag>}
+                {money(o.dealValue) && <Tag bg="transparent" fg={C.ink5}>{money(o.dealValue)}</Tag>}
+                <span style={{ color: C.ink3, fontSize: 11 }}>＋ link</span>
+              </div>
+            )) || null}
+            {pool.length === 0 && <div style={{ fontSize: 12, color: C.ink3, fontStyle: 'italic' }}>No unlinked deals.</div>}
+          </div>
+        </Card>
+      )}
+
+      {opps == null ? <div style={{ padding: 24, textAlign: 'center', color: C.ink3, fontSize: 12 }}>Loading deals…</div>
+        : opps.length === 0 ? <div style={{ padding: 32, textAlign: 'center', color: C.ink3, fontSize: 13, fontStyle: 'italic', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 12 }}>No deals linked to this contact yet.</div>
+        : opps.map(o => (
+          <div key={o.id} style={{ padding: '12px 14px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontFamily: SERIF, fontSize: 15, color: C.ink9, flex: 1, minWidth: 140 }}>{o.name}</span>
+              {o.entity && <Tag bg={C.accS} fg={C.accD}>{o.entity}</Tag>}
+              {money(o.dealValue) && <Tag bg={C.cr2} fg={C.ink5}>{money(o.dealValue)}</Tag>}
+              <select value={o.stage || ''} onChange={e => changeStage(o, e.target.value)} style={selStyle}>
+                {!OPP_STAGES.includes(o.stage) && o.stage && <option value={o.stage}>{o.stage}</option>}
+                {OPP_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+              {o.nextStep && <span style={{ fontSize: 12, color: C.ink5 }}>Next: {o.nextStep}</span>}
+              {o.closeDate && <span style={{ fontSize: 12, color: C.ink5 }}>Close {fmtR(o.closeDate)}</span>}
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+                {o.dataRoom
+                  ? (isAdmin
+                      ? <a href={o.dataRoom} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 10, color: C.acc, textDecoration: 'none' }}>Data room ↗</a>
+                      : <span title="Admin only" style={{ fontFamily: MONO, fontSize: 10, color: C.ink3 }}>🔒 Data room</span>)
+                  : (isAdmin && <button style={tinyBtnDeal} onClick={() => editDataRoom(o)}>+ Data room</button>)}
+                {o.dataRoom && isAdmin && <button style={tinyBtnDeal} onClick={() => editDataRoom(o)}>edit</button>}
+                <button style={tinyBtnDeal} onClick={() => unlink(o)}>Unlink</button>
+              </span>
+            </div>
+          </div>
+        ))}
+    </div>
+  );
+}
+const tinyBtnDeal = { background: 'none', border: `1px solid ${C.cr3}`, borderRadius: 5, padding: '3px 9px', fontFamily: MONO, fontSize: 9, color: C.ink3, cursor: 'pointer', letterSpacing: '.06em', textTransform: 'uppercase' };
+
+// ── Timeline tab ──────────────────────────────────────────────────────────────
+function TimelineTab({ c, notes }) {
+  const [acts, setActs] = useState(null);
+  useEffect(() => { getActivitiesForContact(c.id).then(setActs).catch(() => setActs([])); }, [c.id]);
+
+  const events = useMemo(() => {
+    const out = [];
+    (notes || []).forEach(n => out.push({ id: 'n' + n.id, kind: n.type || 'Note', title: n.title, body: n.summary || n.body, date: n.createdTime }));
+    (acts || []).forEach(a => out.push({ id: 'a' + a.id, kind: a.type || 'Activity', title: a.title || a.type || 'Activity', body: a.aiSummary || a.body, date: a.date }));
+    return out.filter(e => e.date).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [notes, acts]);
+
+  if (notes == null || acts == null) return <div style={{ padding: 24, textAlign: 'center', color: C.ink3, fontSize: 12 }}>Loading timeline…</div>;
+  if (!events.length) return <div style={{ padding: 32, textAlign: 'center', color: C.ink3, fontSize: 13, fontStyle: 'italic', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 12 }}>No notes or activities logged yet.</div>;
+
+  return (
+    <div style={{ position: 'relative', paddingLeft: 22 }}>
+      <div style={{ position: 'absolute', left: 6, top: 4, bottom: 4, width: 2, background: C.cr3 }} />
+      {events.map(e => (
+        <div key={e.id} style={{ position: 'relative', marginBottom: 14 }}>
+          <div style={{ position: 'absolute', left: -22, top: 2, width: 14, height: 14, borderRadius: '50%', background: C.bg, border: `2px solid ${C.acc}` }} />
+          <div style={{ background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 9, padding: '10px 12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 14, color: C.ink9 }}>{e.title}</span>
+              <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, whiteSpace: 'nowrap' }}>{e.kind} · {fmtR(e.date)}</span>
+            </div>
+            {e.body && <div style={{ fontSize: 13, color: C.ink7, marginTop: 5, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{e.body}</div>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── NCNDA compliance panel ────────────────────────────────────────────────────
+function CompliancePanel({ c, showToast }) {
+  const [docs, setDocs] = useState(null);
+  useEffect(() => { getDocumentsForContact(c.id).then(setDocs).catch(() => setDocs([])); }, [c.id]);
+
+  const entities = c.relatesTo || [];
+  if (!entities.length) return null; // no entity relationships → nothing to track
+
+  const ncndaFor = e => (docs || []).find(d => d.type === 'NCNDA' && d.entity === e);
+  const sendSignwell = async (e, resend) => {
+    if (!c.email) { showToast('This contact has no email on file — add one first'); return; }
+    if (!window.confirm(`${resend ? 'Resend' : 'Send'} the ${e} NCNDA to ${c.name} <${c.email}> via SignWell?`)) return;
+    try {
+      await sendNcnda({ counterpartyName: c.name, counterpartyEmail: c.email, notes: `NCNDA — ${e} (sent from CRM compliance panel)` });
+      showToast('SignWell request sent ✓');
+    } catch (err) { showToast('SignWell failed: ' + err.message); }
+  };
+
+  return (
+    <Card style={{ background: C.accS, border: '1px solid #ecd1bc' }}>
+      <SectionLabel>Compliance · NCNDA</SectionLabel>
+      {docs == null ? <div style={{ fontSize: 12, color: C.ink3 }}>Checking…</div> : entities.map(e => {
+        const doc = ncndaFor(e);
+        const es = doc ? docExpState(doc.expires) : null;
+        const warn = es && es.state !== 'ok';
+        return (
+          <div key={e} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: C.bg, border: `1px solid ${warn ? C.red : C.cr2}`, borderRadius: 10, marginBottom: 8 }}>
+            <div style={{ width: 22, height: 22, borderRadius: 6, display: 'grid', placeItems: 'center', flexShrink: 0, background: doc ? C.grn : C.bg2, border: `2px solid ${doc ? C.grn : C.cr3}`, color: '#fff', fontSize: 13 }}>{doc ? '✓' : ''}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 14, color: C.ink9 }}>{e} — NCNDA {warn && <span style={{ color: C.red }}>⚑</span>}</div>
+              <div style={{ fontSize: 11, color: warn ? C.red : C.ink3 }}>{doc
+                ? `${doc.signedDate ? 'Signed ' + fmtR(doc.signedDate) : 'On file'}${doc.expires ? ' · Expires ' + fmtR(doc.expires) + (es?.state === 'soon' ? ` (${es.days}d)` : es?.state === 'expired' ? ' — EXPIRED' : '') : ''}`
+                : 'Not on file'}</div>
+            </div>
+            {doc && !warn
+              ? <a href={doc.driveLink} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.06em', textTransform: 'uppercase', color: C.ink3, textDecoration: 'none' }}>View ↗</a>
+              : <Btn v={warn ? 'acc' : 'gho'} onClick={() => sendSignwell(e, warn)}>⚡ {warn ? 'Resend' : 'Send'}</Btn>}
+          </div>
+        );
+      })}
+      <div style={{ fontSize: 11, color: C.ink3, marginTop: 2 }}>Auto-derived from “Related to” + linked NCNDA documents. Attach an NCNDA in the Files tab and tag it with the entity to check it here.</div>
+    </Card>
+  );
+}
+
+// ── Meeting-prep brief ────────────────────────────────────────────────────────
+function MeetingBrief({ c, tasks, notes, onClose }) {
+  const isMobile = useIsMobile();
+  useEffect(() => {
+    const esc = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+
+  const open = (tasks || []).filter(t => !isDone(t.status));
+  const recentNote = (notes || [])[0];
+  const who = [c.role, c.company, c.type].filter(Boolean).join(' · ') || '—';
+  const points = [
+    c.nextAction ? `Advance: ${c.nextAction}${c.nextActionDate ? ' (' + fmtR(c.nextActionDate) + ')' : ''}.` : 'Confirm the next concrete step and a date.',
+    open.length ? `Close out: ${open[0].task}.` : 'Ask what would move this relationship forward.',
+    recentNote ? `Follow up on: ${(recentNote.summary || recentNote.body || '').slice(0, 140)}` : 'Recap where you last left off.',
+    'Ask who else should be in the room (intros / decision-makers).',
+  ];
+  const Card2 = ({ label, children }) => (
+    <div style={{ padding: 14, background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 12, marginBottom: 12 }}>
+      <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 6 }}>{label}</div>
+      {children}
+    </div>
+  );
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 195, display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 22 }}>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(14,16,20,.6)', backdropFilter: 'blur(4px)' }} />
+      <div style={{ position: 'relative', background: C.bg, borderRadius: isMobile ? 0 : 18, width: '100%', maxWidth: isMobile ? '100%' : 600, height: isMobile ? '100vh' : 'auto', maxHeight: isMobile ? '100vh' : '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,.5)' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 14, right: 18, background: 'none', border: 'none', fontSize: 26, color: C.ink3, cursor: 'pointer', lineHeight: 1, zIndex: 2 }}>×</button>
+        <div style={{ padding: isMobile ? '18px 16px' : '22px 26px 28px', overflowY: 'auto' }}>
+          <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.ink3 }}>✦ Meeting prep</div>
+          <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 22 : 26, letterSpacing: '-.02em', margin: '2px 0 14px', color: C.ink9 }}>{c.name}</h2>
+          <Card2 label="Who they are"><div style={{ fontSize: 14, color: C.ink8 }}>{who}{c.bio ? ` — ${c.bio}` : ''}</div></Card2>
+          {c.involvement && <Card2 label="Involvement"><div style={{ fontSize: 14, color: C.ink8, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{c.involvement}</div></Card2>}
+          <Card2 label="Status"><div style={{ fontSize: 14, color: C.ink8 }}><StaleBadge c={c} />{c.status ? ` · ${c.status}` : ''}</div></Card2>
+          <Card2 label="Open items">
+            {(open.length || c.nextAction) ? (
+              <ul style={{ margin: '2px 0 0', paddingLeft: 18, color: C.ink7, lineHeight: 1.7, fontSize: 14 }}>
+                {c.nextAction && <li><b>Next action:</b> {c.nextAction}{c.nextActionDate ? ` · ${fmtR(c.nextActionDate)}` : ''}</li>}
+                {open.map(t => <li key={t.id}>Task — {t.task}{t.dueDate ? ` (${fmtR(t.dueDate)})` : ''}</li>)}
+              </ul>
+            ) : <div style={{ fontSize: 13, color: C.ink3, fontStyle: 'italic' }}>Nothing open.</div>}
+          </Card2>
+          <Card2 label="✦ Suggested talking points">
+            <ul style={{ margin: '2px 0 0', paddingLeft: 18, color: C.ink7, lineHeight: 1.7, fontSize: 14 }}>
+              {points.map((p, i) => <li key={i}>{p}</li>)}
+            </ul>
+          </Card2>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Btn v="gho" onClick={() => { navigator.clipboard?.writeText(`Meeting prep — ${c.name}\n\nWho: ${who}\nStatus: ${c.status || ''}\nNext action: ${c.nextAction || '—'}\n\nTalking points:\n${points.map(p => '• ' + p).join('\n')}`); }}>Copy</Btn>
+            <Btn onClick={onClose}>Done</Btn>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Overview tab ──────────────────────────────────────────────────────────────
-function OverviewTab({ c, setC, contactTableId, showToast, reloadContacts, onLogged }) {
+function OverviewTab({ c, setC, contactTableId, showToast, reloadContacts, onLogged, allContacts = [], onOpenContactId, isAdmin }) {
   const isMobile = useIsMobile();
   const [editing, setEditing] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
   const [logText, setLogText] = useState('');
   const [logSaving, setLogSaving] = useState(false);
+  const [editKey, setEditKey] = useState(null);   // inline-edit field key
+
+  const inlineInput = { width: '100%', boxSizing: 'border-box', padding: '6px 8px', border: `1px solid ${C.acc}`, borderRadius: 6, background: C.bg, color: C.ink9, fontFamily: SANS, fontSize: 14, outline: 'none' };
+  const EDITABLE = { email: 1, phone: 1, owner: 1, source: 1, segment: 1, introducedBy: 1 };
+  const saveInline = async (key, val) => {
+    setEditKey(null);
+    if ((c[key] || '') === val) return;
+    try { await updateContact(c.id, { [key]: val }); setC(prev => ({ ...prev, [key]: val })); showToast('Saved ✓'); reloadContacts && reloadContacts(); }
+    catch (e) { showToast('Failed: ' + e.message); }
+  };
+  const saveReferrer = async (rid) => {
+    try {
+      await updateContact(c.id, { referrerId: rid || '' });
+      const nm = (allContacts.find(x => x.id === rid) || {}).name || '';
+      setC(prev => ({ ...prev, referrerId: rid || null, referrerName: nm }));
+      showToast('Referrer set ✓'); reloadContacts && reloadContacts();
+    } catch (e) { showToast('Failed: ' + e.message); }
+  };
+  const referrer = c.referrerId ? (allContacts.find(x => x.id === c.referrerId) || { id: c.referrerId, name: c.referrerName || 'Contact' }) : null;
+  const referralChildren = allContacts.filter(x => x.referrerId === c.id);
 
   const handleLog = async () => {
     setLogSaving(true);
@@ -221,8 +478,9 @@ function OverviewTab({ c, setC, contactTableId, showToast, reloadContacts, onLog
   if (editing) return <EditForm c={c} onDone={updated => { if (updated) setC(prev => ({ ...prev, ...updated })); setEditing(false); reloadContacts && reloadContacts(); }} showToast={showToast} />;
 
   const fields = [
-    ['Email', c.email], ['Phone', c.phone], ['Website', c.website],
-    ['Type', c.type], ['Owner', c.owner], ['Source', c.source],
+    ['Email', 'email'], ['Phone', 'phone'], ['Website', 'website'],
+    ['Type', 'type'], ['Owner', 'owner'], ['Source', 'source'],
+    ['Segment', 'segment'], ['Introduced by', 'introducedBy'],
   ];
 
   return (
@@ -246,16 +504,43 @@ function OverviewTab({ c, setC, contactTableId, showToast, reloadContacts, onLog
         </Card>
       )}
 
+      {/* Current summary (rolling) */}
+      {editKey === 'currentSummary' ? (
+        <Card style={{ background: C.accS, border: '1px solid #ecd1bc' }}>
+          <SectionLabel>✦ Current summary</SectionLabel>
+          <textarea autoFocus defaultValue={c.currentSummary || ''} rows={3} style={textareaStyle}
+            onBlur={e => saveInline('currentSummary', e.target.value)}
+            onKeyDown={e => { if (e.key === 'Escape') setEditKey(null); }} />
+        </Card>
+      ) : (
+        <Card style={{ background: C.accS, border: '1px solid #ecd1bc', cursor: 'text' }} onClick={() => setEditKey('currentSummary')}>
+          <SectionLabel>✦ Current summary <span style={{ textTransform: 'none', letterSpacing: 0, color: C.ink3 }}>— rolling; click to edit</span></SectionLabel>
+          <div style={{ fontFamily: SERIF, fontSize: 15, color: C.ink8, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{c.currentSummary || '—'}</div>
+        </Card>
+      )}
+
       {/* Details grid */}
       <Card>
         <SectionLabel>Details</SectionLabel>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
-          {fields.map(([l, v]) => (
-            <div key={l}>
-              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>{l}</div>
-              <div style={{ fontSize: 14, color: C.ink8, wordBreak: 'break-word' }}>{v || '—'}</div>
-            </div>
-          ))}
+          {fields.map(([l, key]) => {
+            const v = c[key];
+            const editable = EDITABLE[key];
+            return (
+              <div key={key}>
+                <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>{l}</div>
+                {editKey === key ? (
+                  <input autoFocus defaultValue={v || ''} onBlur={e => saveInline(key, e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditKey(null); }} style={inlineInput} />
+                ) : (
+                  <div onClick={editable ? () => setEditKey(key) : undefined} title={editable ? 'Click to edit' : undefined}
+                    style={{ fontSize: 14, color: C.ink8, wordBreak: 'break-word', cursor: editable ? 'text' : 'default', borderRadius: 5, padding: '1px 4px', margin: '-1px -4px', display: 'inline-block' }}
+                    onMouseEnter={editable ? e => (e.currentTarget.style.background = C.cr1) : undefined}
+                    onMouseLeave={editable ? e => (e.currentTarget.style.background = '') : undefined}>{v || '—'}</div>
+                )}
+              </div>
+            );
+          })}
           <div>
             <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Last contacted</div>
             <div style={{ fontSize: 14 }}><StaleBadge c={c} /></div>
@@ -272,8 +557,71 @@ function OverviewTab({ c, setC, contactTableId, showToast, reloadContacts, onLog
               {(c.relatesTo || []).length ? (c.relatesTo || []).map(r => <Tag key={r} bg="transparent" fg={C.ink5}>{r}</Tag>) : <span style={{ fontSize: 13, color: C.ink3 }}>—</span>}
             </div>
           </div>
+          {c.linkedin && (
+            <div style={{ gridColumn: '1/-1' }}>
+              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>LinkedIn</div>
+              <a href={c.linkedin} target="_blank" rel="noopener noreferrer" style={{ fontSize: 14, color: C.acc, textDecoration: 'none', wordBreak: 'break-all' }}>{c.linkedin} ↗</a>
+            </div>
+          )}
+          {c.bio && (
+            <div style={{ gridColumn: '1/-1' }}>
+              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Bio</div>
+              <div style={{ fontSize: 14, color: C.ink8, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{c.bio}</div>
+            </div>
+          )}
+          {c.involvement && (
+            <div style={{ gridColumn: '1/-1' }}>
+              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Involvement</div>
+              <div style={{ fontSize: 14, color: C.ink8, lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>{c.involvement}</div>
+            </div>
+          )}
         </div>
       </Card>
+
+      {/* NCNDA compliance */}
+      <CompliancePanel c={c} showToast={showToast} />
+
+      {/* Referral graph */}
+      <Card>
+        <SectionLabel>Referral</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 6 }}>Referred by (who introduced them)</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {referrer
+                ? <button onClick={() => onOpenContactId && onOpenContactId(referrer.id)} title="Open referrer"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 9px', borderRadius: 999, fontSize: 12, fontFamily: SANS, cursor: 'pointer', background: C.accS, color: C.accD, border: '1px solid #ecd1bc' }}>{referrer.name} <span style={{ fontSize: 10, opacity: .7 }}>↗</span></button>
+                : <span style={{ fontSize: 13, color: C.ink3 }}>—</span>}
+              <Sel value={c.referrerId || ''} onChange={e => saveReferrer(e.target.value)} sx={{ width: 'auto', maxWidth: 180 }}>
+                <option value="">Set referrer…</option>
+                {allContacts.filter(x => x.id !== c.id).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </Sel>
+            </div>
+          </div>
+          <div>
+            <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 6 }}>Referred into the CRM (their intros)</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {referralChildren.length ? referralChildren.map(x => (
+                <button key={x.id} onClick={() => onOpenContactId && onOpenContactId(x.id)}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 9px', borderRadius: 999, fontSize: 12, fontFamily: SANS, cursor: 'pointer', background: C.bg2, color: C.ink7, border: `1px solid ${C.cr3}` }}>{x.name} <span style={{ fontSize: 10, opacity: .6 }}>↗</span></button>
+              )) : <span style={{ fontSize: 13, color: C.ink3 }}>none yet</span>}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {isAdmin && (editKey === 'referralEconomics' ? (
+        <Card style={{ background: C.redS, border: `1px solid ${C.cr3}` }}>
+          <SectionLabel>🔒 Admin — Referral economics</SectionLabel>
+          <textarea autoFocus defaultValue={c.referralEconomics || ''} rows={3} style={textareaStyle}
+            onBlur={e => saveInline('referralEconomics', e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditKey(null); }} />
+        </Card>
+      ) : (
+        <Card style={{ background: C.redS, border: `1px solid ${C.cr3}`, cursor: 'text' }} onClick={() => setEditKey('referralEconomics')}>
+          <SectionLabel>🔒 Admin — Referral economics <span style={{ textTransform: 'none', letterSpacing: 0, color: C.ink3 }}>— only admins see this</span></SectionLabel>
+          <div style={{ fontSize: 14, color: C.ink8, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{c.referralEconomics || '—'}</div>
+        </Card>
+      ))}
 
       <div style={{ fontSize: 12, color: C.ink3, textAlign: 'center', padding: '4px 0' }}>
         Documents now live in the <b style={{ color: C.ink5 }}>Files</b> tab, organized into folders.
@@ -340,6 +688,15 @@ const DOC_TYPES = ['NCNDA', 'LOI', 'Term Sheet', 'LOC', 'Contract', 'Deck', 'Oth
 function hostLabel(url) {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
 }
+// Expiry state for NCNDA/contract dates: null | { state:'ok'|'soon'|'expired', days }
+function docExpState(expires) {
+  if (!expires) return null;
+  const t = new Date(expires); if (isNaN(t.getTime())) return null;
+  const days = Math.round((t.getTime() - Date.now()) / 86400000);
+  if (days < 0) return { state: 'expired', days };
+  if (days <= 30) return { state: 'soon', days };
+  return { state: 'ok', days };
+}
 
 function FilesTab({ c, showToast, onCount }) {
   const isMobile = useIsMobile();
@@ -353,6 +710,9 @@ function FilesTab({ c, showToast, onCount }) {
   const [fUrl, setFUrl]       = useState('');
   const [fType, setFType]     = useState('Other');
   const [fFolder, setFFolder] = useState('');   // '' = unfiled
+  const [fSigned, setFSigned] = useState('');
+  const [fExpires, setFExpires] = useState('');
+  const [fEntity, setFEntity] = useState('');   // which entity an NCNDA/contract covers
   const [saving, setSaving]   = useState(false);
 
   // create-folder form
@@ -409,9 +769,10 @@ function FilesTab({ c, showToast, onCount }) {
       await createDocument({
         name: fName.trim(), driveLink: fUrl.trim(), type: fType,
         contactIds: [c.id], folderIds: fFolder ? [fFolder] : undefined,
+        signedDate: fSigned || undefined, expires: fExpires || undefined, entity: fEntity || undefined,
       });
-      showToast('File linked ✓');
-      setFName(''); setFUrl(''); setFType('Other'); setFFolder(''); setShowAdd(false);
+      showToast(fEntity && fType === 'NCNDA' ? `NCNDA linked → ${fEntity} compliance checked ✓` : 'File linked ✓');
+      setFName(''); setFUrl(''); setFType('Other'); setFFolder(''); setFSigned(''); setFExpires(''); setFEntity(''); setShowAdd(false);
       await load();
     } catch (e) { showToast('Failed: ' + e.message); }
     setSaving(false);
@@ -483,14 +844,20 @@ function FilesTab({ c, showToast, onCount }) {
         </div>
       );
     }
+    const es = docExpState(d.expires);
+    const warn = es && es.state !== 'ok';
+    const meta = (d.signedDate || d.expires)
+      ? `${d.signedDate ? 'Signed ' + fmtR(d.signedDate) : ''}${d.signedDate && d.expires ? ' · ' : ''}${d.expires ? 'Expires ' + fmtR(d.expires) + (es?.state === 'soon' ? ` (${es.days}d)` : es?.state === 'expired' ? ' — EXPIRED' : '') : ''}`
+      : hostLabel(d.driveLink);
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: C.bg, border: `1px solid ${C.cr2}`, borderRadius: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: C.bg, border: `1px solid ${warn ? C.red : C.cr2}`, borderRadius: 8, marginBottom: 6 }}>
         <span style={{ width: 26, height: 26, borderRadius: 7, background: C.accS, color: C.accD, display: 'grid', placeItems: 'center', fontSize: 13, flexShrink: 0 }}>⎘</span>
         <a href={d.driveLink} target="_blank" rel="noopener noreferrer" style={{ minWidth: 0, flex: 1, textDecoration: 'none' }}>
-          <div style={{ fontFamily: SERIF, fontSize: 14, color: C.ink9, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.name} <span style={{ color: C.ink3, fontSize: 11 }}>↗</span></div>
-          <div style={{ fontFamily: MONO, fontSize: 10, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hostLabel(d.driveLink)}</div>
+          <div style={{ fontFamily: SERIF, fontSize: 14, color: C.ink9, lineHeight: 1.25, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{warn && <span style={{ color: C.red }}>⚑ </span>}{d.name} <span style={{ color: C.ink3, fontSize: 11 }}>↗</span></div>
+          <div style={{ fontFamily: MONO, fontSize: 10, color: warn ? C.red : C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{meta}</div>
         </a>
         {d.type && <Tag bg={C.cr2} fg={C.ink5}>{d.type}</Tag>}
+        {d.entity && <Tag bg={C.accS} fg={C.accD}>{d.entity}</Tag>}
         <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
           <button style={tinyBtn} onClick={() => setMovingId(d.id)}>Move</button>
           <button style={tinyBtn} onClick={() => setRenaming({ id: d.id, name: d.name })}>Rename</button>
@@ -547,6 +914,20 @@ function FilesTab({ c, showToast, onCount }) {
                 </Sel>
               </FR>
             </div>
+            {(fType === 'NCNDA' || fType === 'Contract' || fType === 'LOI' || fType === 'Term Sheet') && (
+              <>
+                <FR label="Entity this covers (checks the compliance box)">
+                  <Sel value={fEntity} onChange={e => setFEntity(e.target.value)}>
+                    <option value="">— none —</option>
+                    {(c.relatesTo || []).map(e => <option key={e} value={e}>{e}</option>)}
+                  </Sel>
+                </FR>
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+                  <FR label="Signed date"><Inp type="date" value={fSigned} onChange={e => setFSigned(e.target.value)} /></FR>
+                  <FR label="Expiry date (flags red near expiry)"><Inp type="date" value={fExpires} onChange={e => setFExpires(e.target.value)} /></FR>
+                </div>
+              </>
+            )}
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}><Btn onClick={saveFile} disabled={saving}>{saving ? 'Saving…' : 'Save file'}</Btn></div>
           </div>
         </Card>

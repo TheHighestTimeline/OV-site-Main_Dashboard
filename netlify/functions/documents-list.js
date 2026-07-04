@@ -9,7 +9,9 @@ const DOCUMENTS_MAP = {
   type:       'Type',
   driveLink:  'Drive Link',
   signedDate: 'Signed Date',
+  expires:    'Expiry Date',
   version:    'Version',
+  entity:     'Entity',
 };
 
 // Optional query params: ?contactId=recXXX  ?companyId=recXXX

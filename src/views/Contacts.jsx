@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { C, SERIF, SANS, MONO, RELATES, stBg, stFg, fmtR } from '../constants.js';
 import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, Spinner } from '../components/UI.jsx';
-import { getContacts, createContact, parseVoice, getAirtableSchema } from '../api.js';
+import { getContacts, createContact, updateContact, mergeContacts, parseVoice, getAirtableSchema, getAppState, setAppState } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import { companyNameMatchesSlug } from '../constants/roles.js';
 import ContactProfile from './ContactProfile.jsx';
@@ -64,6 +64,27 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
   const [followupOnly,     setFollowupOnly]     = useState(false);
   const [activeContact,    setActiveContact]    = useState(null);   // opens full-screen profile
   const [activeCompany,    setActiveCompany]    = useState(null);   // { id, name } → opens CompanySnapshot
+  const [pins,             setPins]             = useState([]);     // pinned contact ids (persisted via app-state)
+  const [selIds,           setSelIds]           = useState([]);     // bulk-selected contact ids
+  const [bulkStatus,       setBulkStatus]       = useState('');
+  const [bulkOwner,        setBulkOwner]        = useState('');
+  const [bulkRel,          setBulkRel]          = useState('');
+  const [bulkBusy,         setBulkBusy]         = useState(false);
+  const [paletteOpen,      setPaletteOpen]      = useState(false);  // ⌘K quick-jump
+  const [dupOpen,          setDupOpen]          = useState(false);  // duplicate review modal
+  const searchWrapRef = useRef(null);
+
+  // Keyboard shortcuts: ⌘K/Ctrl+K quick-jump, "/" focuses search.
+  useEffect(() => {
+    const onKey = e => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(v => !v); return; }
+      const tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+      if (e.key === '/') { e.preventDefault(); searchWrapRef.current?.querySelector('input')?.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   const [prioritizing,     setPrioritizing]     = useState(false);
   const [priorityResult,   setPriorityResult]   = useState(null);   // { ranked: [...] } | 'error'
 
@@ -74,6 +95,48 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
       .finally(() => setLoading(false)),
   [showToast]);
   useEffect(() => { loadContacts(); }, [loadContacts]);
+
+  // Pinned contacts — persisted in the shared app-state store (syncs across devices).
+  useEffect(() => {
+    getAppState('crm.pins').then(d => setPins(Array.isArray(d?.ids) ? d.ids : [])).catch(() => {});
+  }, []);
+  const togglePin = (id) => {
+    setPins(prev => {
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+      setAppState('crm.pins', { ids: next }).catch(() => {});
+      return next;
+    });
+  };
+
+  // Merge duplicate contacts: fold dropIds into keepId (server reassigns links + deletes dups).
+  const mergeDuplicates = async (keepId, dropIds) => {
+    try {
+      for (const d of dropIds) await mergeContacts(keepId, d);
+      showToast(`Merged ${dropIds.length} duplicate${dropIds.length > 1 ? 's' : ''} ✓`);
+      setDupOpen(false); loadContacts();
+    } catch (e) { showToast('Merge failed: ' + e.message); }
+  };
+
+  // Bulk edit selected contacts (status / owner / add related-to entity).
+  const bulkApply = async () => {
+    if (!selIds.length || (!bulkStatus && !bulkOwner.trim() && !bulkRel)) { showToast('Pick a status, owner, or entity to apply'); return; }
+    setBulkBusy(true);
+    try {
+      for (const id of selIds) {
+        const c = contacts.find(x => x.id === id);
+        if (!c) continue;
+        const patch = {};
+        if (bulkStatus) patch.status = bulkStatus;
+        if (bulkOwner.trim()) patch.owner = bulkOwner.trim();
+        if (bulkRel) { const rt = Array.isArray(c.relatesTo) ? c.relatesTo : []; patch.relatesTo = rt.includes(bulkRel) ? rt : [...rt, bulkRel]; }
+        if (Object.keys(patch).length) await updateContact(id, patch);
+      }
+      showToast(`Updated ${selIds.length} contact${selIds.length > 1 ? 's' : ''} ✓`);
+      setSelIds([]); setBulkStatus(''); setBulkOwner(''); setBulkRel('');
+      loadContacts();
+    } catch (e) { showToast('Bulk update failed: ' + e.message); }
+    setBulkBusy(false);
+  };
 
   const [contactTableId, setContactTableId] = useState(null);
   useEffect(() => {
@@ -95,6 +158,18 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
   ), [contacts, companyFilter]);
 
   const followupCount = useMemo(() => companyScoped.filter(needsFollowup).length, [companyScoped]);
+
+  // Duplicate detection: group by shared email, or exact normalized name.
+  const dupGroups = useMemo(() => {
+    const byKey = {};
+    companyScoped.forEach(c => {
+      const email = (c.email || '').trim().toLowerCase();
+      const key = email ? 'e:' + email : 'n:' + (c.name || '').trim().toLowerCase();
+      if (key === 'n:') return;
+      (byKey[key] = byKey[key] || []).push(c);
+    });
+    return Object.values(byKey).filter(a => a.length > 1);
+  }, [companyScoped]);
 
   const filtered = companyScoped.filter(c => {
     if (followupOnly && !needsFollowup(c)) return false;
@@ -222,11 +297,41 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
           <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 26 : 38, letterSpacing: '-.025em', margin: 0, color: C.ink9, lineHeight: 1 }}>Contacts</h1>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…" sx={{ width: 180 }} />
+          <span ref={searchWrapRef} style={{ display: 'inline-block' }}><Inp value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…  ( / )" sx={{ width: 180 }} /></span>
+          <Btn v="gho" onClick={() => setPaletteOpen(true)} title="Quick jump (⌘K)">⌘K</Btn>
           <Btn v="gho" onClick={() => openOv({ kind: 'modal', title: 'Voice add contact', body: <VoiceAddForm onSave={addContact} /> })}>◉ Voice</Btn>
           <Btn onClick={() => openOv({ kind: 'modal', title: 'New contact', body: <CAddForm onSave={addContact} prefill={companyFilter ? { relatesTo: [SLUG_TO_COMPANY_NAME[companyFilter] || companyFilter] } : {}} /> })}>+ New</Btn>
         </div>
       </div>
+
+      {/* Pinned quick-access strip */}
+      {(() => {
+        const pinned = companyScoped.filter(c => pins.includes(c.id));
+        if (!pinned.length) return null;
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+            <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: C.ink3, marginRight: 4 }}>★ Pinned</span>
+            {pinned.map(c => (
+              <span key={c.id} onClick={() => openContact(c)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.bg2, border: `1px solid ${C.cr3}`, borderRadius: 999, padding: '5px 11px', cursor: 'pointer', fontSize: 12, color: C.ink7 }}>
+                {c.name}
+                <span onClick={e => { e.stopPropagation(); togglePin(c.id); }} title="Unpin" style={{ color: C.yel, cursor: 'pointer' }}>★</span>
+              </span>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* Duplicate detection banner */}
+      {!loading && dupGroups.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '10px 16px', marginBottom: 14, background: C.redS, border: '1px solid #e0b4b4', borderRadius: 12 }}>
+          <span style={{ fontSize: 16 }}>⚠</span>
+          <div style={{ flex: 1, minWidth: 180, fontSize: 13, color: C.red }}>
+            {dupGroups.length} possible duplicate {dupGroups.length > 1 ? 'sets' : 'set'} — e.g. <b>{(dupGroups[0].map(c => c.name).join(' / '))}</b>
+          </div>
+          <Btn v="gho" onClick={() => setDupOpen(true)}>Review</Btn>
+        </div>
+      )}
 
       {/* Follow-up reminder banner */}
       {!loading && followupCount > 0 && (
@@ -273,6 +378,20 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
         )}
       </div>
 
+      {/* Bulk action bar */}
+      {selIds.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '10px 14px', marginBottom: 12, background: C.ink9, borderRadius: 11 }}>
+          <b style={{ fontSize: 13, color: C.bg }}>{selIds.length} selected</b>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Sel value={bulkStatus} onChange={e => setBulkStatus(e.target.value)} sx={{ width: 'auto' }}><option value="">Set status…</option><option>Active</option><option>Benched</option><option>Unknown</option></Sel>
+            <Inp value={bulkOwner} onChange={e => setBulkOwner(e.target.value)} placeholder="Set owner…" sx={{ width: 130 }} />
+            <Sel value={bulkRel} onChange={e => setBulkRel(e.target.value)} sx={{ width: 'auto' }}><option value="">+ Related to…</option>{RELATES.map(r => <option key={r}>{r}</option>)}</Sel>
+            <Btn onClick={bulkApply} disabled={bulkBusy}>{bulkBusy ? 'Applying…' : 'Apply'}</Btn>
+            <Btn v="gho" onClick={() => setSelIds([])}>Clear</Btn>
+          </div>
+        </div>
+      )}
+
       {/* Table */}
       {loading ? (
         <div style={{ padding: 32, textAlign: 'center', color: C.ink3 }}>Loading contacts…</div>
@@ -286,6 +405,10 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 960 }}>
             <thead>
               <tr>
+                <th style={{ width: 34, padding: '9px 14px', borderBottom: `1px solid ${C.cr2}` }}>
+                  <input type="checkbox" checked={filtered.length > 0 && filtered.every(c => selIds.includes(c.id))}
+                    onChange={e => setSelIds(e.target.checked ? filtered.map(c => c.id) : [])} />
+                </th>
                 {[
                   { label: 'Name', col: 'name' }, { label: 'Company', col: 'company' }, { label: 'Role', col: 'role' },
                   { label: 'Related to', col: null }, { label: 'Email', col: 'email' }, { label: 'Phone', col: null },
@@ -309,7 +432,13 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
                   <tr key={c.id} onClick={() => openContact(c)} style={{ cursor: 'pointer' }}
                     onMouseEnter={e => e.currentTarget.style.background = C.cr1}
                     onMouseLeave={e => e.currentTarget.style.background = ''}>
+                    <td onClick={e => e.stopPropagation()} style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}>
+                      <input type="checkbox" checked={selIds.includes(c.id)}
+                        onChange={() => setSelIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} />
+                    </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: SERIF, fontWeight: 500, fontSize: 14, color: C.ink9 }}>
+                      <span onClick={e => { e.stopPropagation(); togglePin(c.id); }} title={pins.includes(c.id) ? 'Unpin' : 'Pin'}
+                        style={{ color: pins.includes(c.id) ? C.yel : C.cr3, cursor: 'pointer', marginRight: 6, fontSize: 13 }}>★</span>
                       {flag && <span title="Needs follow-up" style={{ color: C.red, marginRight: 6 }}>⚑</span>}{c.name}
                     </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>
@@ -345,6 +474,9 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
           onClose={() => setActiveContact(null)}
           showToast={showToast}
           reloadContacts={loadContacts}
+          allContacts={contacts}
+          onOpenContactId={id => { const t = contacts.find(x => x.id === id); if (t) setActiveContact(t); }}
+          user={user}
         />
       )}
 
@@ -367,6 +499,125 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
           onPick={id => { const c = contacts.find(x => x.id === id); if (c) { setPriorityResult(null); setActiveContact(c); } }}
         />
       )}
+
+      {/* ⌘K quick-jump palette */}
+      {paletteOpen && (
+        <QuickJump
+          contacts={contacts}
+          onClose={() => setPaletteOpen(false)}
+          onOpenContact={c => { setPaletteOpen(false); setActiveContact(c); }}
+          onOpenCompany={co => { setPaletteOpen(false); setActiveCompany({ id: co.id, name: co.name }); }}
+        />
+      )}
+
+      {/* Duplicate review */}
+      {dupOpen && (
+        <DupReview
+          groups={dupGroups}
+          onClose={() => setDupOpen(false)}
+          onOpen={c => { setDupOpen(false); setActiveContact(c); }}
+          onMerge={mergeDuplicates}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Duplicate review + merge modal ────────────────────────────────────────────
+function DupReview({ groups, onClose, onOpen, onMerge }) {
+  const isMobile = useIsMobile();
+  const [primary, setPrimary] = useState({}); // groupIndex -> contactId (keep)
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const esc = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+
+  const doMerge = async (gi, grp) => {
+    const keepId = primary[gi] || grp[0].id;
+    const keep = grp.find(c => c.id === keepId);
+    const dropIds = grp.filter(c => c.id !== keepId).map(c => c.id);
+    if (!dropIds.length) return;
+    if (!window.confirm(`Merge ${dropIds.length} record${dropIds.length > 1 ? 's' : ''} into “${keep.name}”?\n\nTheir notes, files, deals, tasks and referral links move to the kept contact, and the duplicate record${dropIds.length > 1 ? 's are' : ' is'} deleted. This can't be undone.`)) return;
+    setBusy(true);
+    await onMerge(keepId, dropIds);
+    setBusy(false);
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 175, background: 'rgba(14,16,20,.55)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ position: 'relative', background: C.bg, borderRadius: isMobile ? 0 : 16, width: '100%', maxWidth: isMobile ? '100%' : 580, height: isMobile ? '100vh' : 'auto', maxHeight: isMobile ? '100vh' : '85vh', overflowY: 'auto', padding: isMobile ? '20px 16px' : 24, boxShadow: '0 24px 60px rgba(0,0,0,.4)' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: C.ink3, cursor: 'pointer' }}>×</button>
+        <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Duplicates</div>
+        <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 22, margin: '0 0 6px', color: C.ink9 }}>Review & merge</h2>
+        <p style={{ fontSize: 12, color: C.ink5, margin: '0 0 16px' }}>Grouped by shared email or identical name. Pick which record to keep (●), then merge — the others' notes, files, deals, tasks and referral links move onto it and the duplicates are deleted.</p>
+        {groups.map((grp, i) => {
+          const keepId = primary[i] || grp[0].id;
+          return (
+            <div key={i} style={{ border: `1px solid ${C.cr2}`, borderRadius: 10, padding: 10, marginBottom: 12, background: C.bg2 }}>
+              {grp.map(c => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 8 }}>
+                  <input type="radio" name={`prim-${i}`} checked={keepId === c.id} onChange={() => setPrimary(p => ({ ...p, [i]: c.id }))} title="Keep this one" />
+                  <span onClick={() => onOpen(c)} style={{ flex: 1, fontFamily: SERIF, fontSize: 14, color: C.ink9, cursor: 'pointer' }}>{c.name} {keepId === c.id && <span style={{ fontSize: 10, color: C.grn }}>keep</span>}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.email || 'no email'}</span>
+                  <span onClick={() => onOpen(c)} style={{ color: C.ink3, fontSize: 13, cursor: 'pointer' }}>›</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                <Btn onClick={() => doMerge(i, grp)} disabled={busy}>{busy ? 'Merging…' : 'Merge into keep'}</Btn>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── ⌘K quick-jump palette ─────────────────────────────────────────────────────
+function QuickJump({ contacts, onClose, onOpenContact, onOpenCompany }) {
+  const isMobile = useIsMobile();
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const esc = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
+
+  const fz = (h, s) => { h = (h || '').toLowerCase(); s = s.toLowerCase(); let i = 0; for (const ch of s) { i = h.indexOf(ch, i); if (i < 0) return false; i++; } return true; };
+  const comps = useMemo(() => {
+    const m = new Map();
+    contacts.forEach(c => (c.companies || []).forEach(co => { if (co.id && !m.has(co.id)) m.set(co.id, co.name || 'Company'); }));
+    return [...m].map(([id, name]) => ({ id, name }));
+  }, [contacts]);
+
+  const results = [];
+  contacts.forEach(c => { if (!q || fz([c.name, c.company, c.email, c.role].filter(Boolean).join(' '), q)) results.push({ key: 'c' + c.id, type: 'Contact', label: c.name, sub: [c.role, c.company].filter(Boolean).join(' · '), go: () => onOpenContact(c) }); });
+  comps.forEach(co => { if (q && fz(co.name, q)) results.push({ key: 'co' + co.id, type: 'Company', label: co.name, sub: 'Company', go: () => onOpenCompany(co) }); });
+  const rows = results.slice(0, 25);
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(14,16,20,.5)', backdropFilter: 'blur(3px)', display: 'grid', placeItems: 'start center', paddingTop: '12vh' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 14, width: '100%', maxWidth: isMobile ? '92%' : 560, boxShadow: '0 30px 80px rgba(0,0,0,.5)', overflow: 'hidden' }}>
+        <input autoFocus value={q} onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && rows[0]) rows[0].go(); }}
+          placeholder="Jump to a contact or company…"
+          style={{ width: '100%', boxSizing: 'border-box', border: 'none', borderBottom: `1px solid ${C.cr2}`, padding: '14px 16px', fontFamily: SANS, fontSize: 15, color: C.ink9, background: C.bg, outline: 'none' }} />
+        <div style={{ maxHeight: '52vh', overflowY: 'auto', padding: 6 }}>
+          {rows.length ? rows.map(r => (
+            <div key={r.key} onClick={r.go} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', borderRadius: 9, cursor: 'pointer' }}
+              onMouseEnter={e => e.currentTarget.style.background = C.cr1}
+              onMouseLeave={e => e.currentTarget.style.background = ''}>
+              <Tag bg={r.type === 'Company' ? C.accS : C.bluS} fg={r.type === 'Company' ? C.accD : C.blu}>{r.type}</Tag>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: SERIF, fontSize: 14, color: C.ink9 }}>{r.label}</div>
+                {r.sub && <div style={{ fontSize: 11, color: C.ink3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.sub}</div>}
+              </div>
+            </div>
+          )) : <div style={{ padding: 20, textAlign: 'center', color: C.ink3, fontSize: 13, fontStyle: 'italic' }}>No matches.</div>}
+        </div>
+      </div>
     </div>
   );
 }

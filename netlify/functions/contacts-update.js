@@ -14,6 +14,8 @@ export const handler = async (event) => {
     const {
       id, name, role, email, phone, status, type, relatesTo,
       last_contacted_at, owner, nextAction, nextActionDate, source,
+      segment, introducedBy, bio, involvement, companyAddress,
+      currentSummary, referrerId, referralEconomics,
     } = body;
     if (!id) return err(400, 'id is required');
 
@@ -35,8 +37,17 @@ export const handler = async (event) => {
     if (nextAction     !== undefined) update.nextAction     = nextAction;
     if (nextActionDate !== undefined) update.nextActionDate = nextActionDate;
     if (source         !== undefined) update.source         = source;
+    if (segment        !== undefined) update.segment        = segment;
+    if (introducedBy   !== undefined) update.introducedBy   = introducedBy;
+    if (bio            !== undefined) update.bio            = bio;
+    if (involvement    !== undefined) update.involvement    = involvement;
+    if (companyAddress !== undefined) update.companyAddress = companyAddress;
+    if (currentSummary !== undefined) update.currentSummary = currentSummary;
+    if (referralEconomics !== undefined) update.referralEconomics = referralEconomics;
 
     const fields = toAirtableFields(update, CONTACTS_MAP);
+    // Referral link (self-link to another CRM contact). Empty string/null clears it.
+    if (referrerId !== undefined) fields['Referred By'] = referrerId ? [referrerId] : [];
     if (Object.keys(fields).length === 0) return ok({ id, updated: false });
 
     await airtableUpdate(TABLE(), id, fields);

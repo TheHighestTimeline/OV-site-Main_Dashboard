@@ -258,6 +258,14 @@ export const CONTACTS_MAP = {
   nextAction:      'Next Action',
   nextActionDate:  'Next Action Date',
   source:          'Source',
+  bio:             'Bio',            // added 2026-07 — surfaced in the contact profile Overview
+  involvement:     'Involvement',
+  segment:         'Segment',
+  introducedBy:    'Introduced By',
+  companyAddress:  'Company Address',
+  currentSummary:  'Current Summary', // added 2026-07 — rolling 1-2 sentence summary
+  relatesTo:       'Related Entities', // added 2026-07 — deal-category / entity multi-select (previously a phantom field that never persisted)
+  referralEconomics: 'Referral Economics', // added 2026-07 — admin-only referral fee/split note
   // updatedAt comes from Last Modified Time (auto-populated by fromAirtableRecord)
 };
 
@@ -292,6 +300,8 @@ export const OPPORTUNITIES_MAP = {
   notes:       'Notes',
   entity:      'Entity',   // singleSelect -> drives company tabs
   type:        'Type',     // singleSelect Internal/External
+  nextStep:    'Next Step',
+  dataRoom:    'Data Room', // added 2026-07 — deal data-room URL, shown on contact Deals tab
 };
 
 export const OUTREACH_MAP = {

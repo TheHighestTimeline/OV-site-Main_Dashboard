@@ -21,7 +21,7 @@ export const handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); } catch { return err(400, 'Invalid JSON'); }
 
   const { id, name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
-          companyIds, contactIds, projectIds } = body;
+          nextStep, dataRoom, companyIds, contactIds, projectIds } = body;
   if (!id) return err(400, 'id is required');
 
   try {
@@ -32,6 +32,8 @@ export const handler = async (event) => {
     if (dealValue !== undefined) update.dealValue = dealValue != null && dealValue !== '' ? Number(dealValue) : null;
     if (closeDate !== undefined) update.closeDate = closeDate || null;
     if (entity    !== undefined) update.entity    = entity || null;
+    if (nextStep  !== undefined) update.nextStep  = nextStep;
+    if (dataRoom  !== undefined) update.dataRoom  = dataRoom;
     const t = normType(type, kanbanType);
     if (t !== undefined) update.type = t;
 

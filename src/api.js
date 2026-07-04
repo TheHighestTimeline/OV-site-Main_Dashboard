@@ -70,6 +70,7 @@ export const getClients     = ()         => req('clients-list');
 export const getContacts   = ()         => req('contacts-list');
 export const createContact = data       => req('contacts-create', { method: 'POST',  body: JSON.stringify(data) });
 export const updateContact = (id, data) => req('contacts-update', { method: 'PATCH', body: JSON.stringify({ id, ...data }) });
+export const mergeContacts = (keepId, dropId) => req('contacts-merge', { method: 'POST', body: JSON.stringify({ keepId, dropId }) });
 
 // Notes (contact notes)
 export const getNotes    = contactId    => req(`notes-list?contactId=${contactId}`);
@@ -85,6 +86,7 @@ export const getCompanies = () => req('companies-list');
 // an Activity links to exactly one Company, so it can answer "what happened
 // with Carbon Sponge" even though the Contact also works with OVMG.)
 export const getActivities    = (companyId) => req(`activities-list?companyId=${encodeURIComponent(companyId)}`);
+export const getActivitiesForContact = (contactId) => req(`activities-list?contactId=${encodeURIComponent(contactId)}`);
 export const createActivity   = data        => req('activities-create', { method: 'POST', body: JSON.stringify(data) });
 
 // Documents (Drive is the source of truth for the file; this stores metadata

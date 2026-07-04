@@ -9,7 +9,9 @@ const DOCUMENTS_MAP = {
   type:       'Type',
   driveLink:  'Drive Link',
   signedDate: 'Signed Date',
+  expires:    'Expiry Date',
   version:    'Version',
+  entity:     'Entity',
 };
 
 // Partial update — only fields present in the body are touched. Powers:
@@ -25,7 +27,7 @@ export const handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
     const {
-      id, name, type, driveLink, signedDate, version,
+      id, name, type, driveLink, signedDate, version, expires, entity,
       tags, folderIds, contactIds, companyIds, opportunityIds,
     } = body;
 
@@ -38,7 +40,9 @@ export const handler = async (event) => {
     if (type       !== undefined) scalar.type       = type;
     if (driveLink  !== undefined) scalar.driveLink  = driveLink;
     if (signedDate !== undefined) scalar.signedDate = signedDate;
+    if (expires    !== undefined) scalar.expires    = expires;
     if (version    !== undefined) scalar.version    = version;
+    if (entity     !== undefined) scalar.entity     = entity;
     const fields = toAirtableFields(scalar, DOCUMENTS_MAP);
 
     // Link / multi-select fields — an empty array is a meaningful value here
