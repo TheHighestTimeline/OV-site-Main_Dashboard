@@ -5,16 +5,17 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: 'dist',
-    // Split the big, rarely-changing vendor libraries into their own chunk.
-    // React, Clerk and Supabase change only when you bump versions, so isolating
-    // them means a normal app deploy doesn't bust their cached chunk — repeat
-    // visitors re-download only your changed app code, not the whole framework.
+    // One combined vendor chunk for ALL node_modules code (2026-07 fix).
+    // The previous config split react / @clerk/clerk-react into separate
+    // chunks; newer Clerk versions share internals with React in a way that
+    // made the split chunks initialize out of order — a blank page with
+    // "ReferenceError: Cannot access 'L' before initialization" in
+    // clerk-vendor. A single vendor chunk keeps the caching benefit (vendor
+    // code only changes when you bump versions) with no ordering hazard.
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'clerk-vendor': ['@clerk/clerk-react'],
-          'supabase-vendor': ['@supabase/supabase-js'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) return 'vendor';
         },
       },
     },
