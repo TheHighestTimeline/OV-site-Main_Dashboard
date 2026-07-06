@@ -1,7 +1,7 @@
 // email-state — lightweight UI state persistence for the Email tab.
 // Stores last-viewed label + active draft per user in Airtable.
 // Falls back to defaults so Email.jsx always works even if saves fail.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { airtableList, airtableCreate, airtableUpdate } from './_airtable.js';
 

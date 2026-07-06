@@ -33,18 +33,33 @@ async function getToken() {
   }
 }
 
+// Default 45s timeout (voice transcribe/parse can legitimately take a while;
+// everything else fails long before that). Pass opts.timeoutMs to override.
 async function req(path, opts = {}) {
   const token = await getToken();
-  const res = await fetch(`${BASE}/${path}`, {
-    ...opts,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(opts.headers || {}),
-    },
-  });
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs || 45000);
+  let res;
+  try {
+    res = await fetch(`${BASE}/${path}`, {
+      ...opts,
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(opts.headers || {}),
+      },
+    });
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('Request timed out — check your connection and try again.');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
-    const msg = await res.text().catch(() => res.statusText);
+    let msg = await res.text().catch(() => res.statusText);
+    // Server errors arrive as {"error": "..."} — unwrap for readable toasts.
+    try { const j = JSON.parse(msg); if (j.error) msg = typeof j.error === 'string' ? j.error : JSON.stringify(j.error); } catch {}
     throw new Error(msg || `HTTP ${res.status}`);
   }
   return res.json();
@@ -149,11 +164,8 @@ export const deleteResource    = id                  => req('resources-delete', 
 export const upsertCategory    = data                => req('categories-upsert', { method: 'POST', body: JSON.stringify(data) });
 export const deleteCategory    = id                  => req('categories-delete', { method: 'POST', body: JSON.stringify({ id }) });
 
-// Documents (legacy Notion-backed — kept for any consumer that still uses them)
-export const getDocs   = ()         => req('docs-list');
-export const createDoc = data       => req('docs-create', { method: 'POST', body: JSON.stringify(data) });
-export const updateDoc = (id, data) => req('docs-update', { method: 'POST', body: JSON.stringify({ id, ...data }) });
-export const deleteDoc = id         => req('docs-delete', { method: 'POST', body: JSON.stringify({ id }) });
+// (Legacy Notion-backed docs API removed 2026-07 — migration to Airtable is
+// complete; use getDocuments/createDocument above.)
 
 // Email
 export const sendEmail          = data                 => req('send-email',           { method: 'POST', body: JSON.stringify(data) });
@@ -177,6 +189,17 @@ export const setToolOverride   = (userId, tab, action) =>
 // NCNDA
 export const sendNcnda         = data       =>
   req('ncnda-send', { method: 'POST', body: JSON.stringify(data) });
+
+// Bug reports (§2.4)
+export const sendBugReport     = data       =>
+  req('bug-report', { method: 'POST', body: JSON.stringify(data) });
+
+// ── Review queue (§4 — Granola calls + audio dumps, approve-before-write) ────
+export const listReviews       = (status = 'pending') => req(`reviews-list?status=${encodeURIComponent(status)}`);
+export const countPendingReviews = ()       => req('reviews-list?status=pending&countOnly=1');
+export const createReview      = data       => req('reviews-create', { method: 'POST', body: JSON.stringify(data) });
+export const applyReview       = (id, actions) => req('reviews-apply', { method: 'POST', body: JSON.stringify({ id, actions }) });
+export const updateReview      = (id, data) => req('reviews-update', { method: 'POST', body: JSON.stringify({ id, ...data }) });
 
 // ── GitHub proxy (used by the Websites tab) ─────────────────────────────────
 const ghProxy = (action, params = {}) =>

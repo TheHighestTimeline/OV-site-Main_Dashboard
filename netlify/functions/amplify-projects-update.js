@@ -1,7 +1,7 @@
 // netlify/functions/amplify-projects-update.js
 // PATCH a single Amplify Projects record (primarily used to update Status via kanban drag).
 import { airtableUpdate } from './_airtable.js';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 const TABLE = () => process.env.AIRTABLE_TABLE_AMPLIFY_PROJECTS || 'Amplify Projects';

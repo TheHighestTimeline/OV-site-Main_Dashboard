@@ -1,6 +1,6 @@
 import { useUser, useClerk } from '@clerk/clerk-react';
 import {
-  TAB_ACCESS, ALL_TABS, NEVER_OVERRIDABLE_TO_NON_OVMG,
+  TAB_ACCESS, ALL_TABS, NEVER_OVERRIDABLE_TO_NON_OVMG, BOOTSTRAP_ADMINS,
 } from '../constants/roles.js';
 
 /**
@@ -37,21 +37,25 @@ export function useAuth() {
     const isOvmgEmail = email.endsWith('@onevibemediagroup.com');
 
     // Merge legacy single role into the array (no duplicates)
-    const effectiveRoles = Array.from(new Set([
+    let effectiveRoles = Array.from(new Set([
       ...roles,
       ...(legacyRole && !roles.includes(legacyRole) ? [legacyRole] : []),
     ]));
 
-    const isAdmin      = isOvmgEmail || effectiveRoles.includes('admin');
-    // hasFullAccess = at least one non-sales role, or OVMG email
+    // SECURITY FIX (2026-07 audit §1.1): OVMG domain no longer grants admin.
+    // OVMG employees with no roles assigned yet default to 'member' so the
+    // team keeps working; admin comes ONLY from the 'admin' role or the
+    // bootstrap allowlist (mirrors ADMIN_EMAILS enforced server-side).
+    if (effectiveRoles.length === 0 && isOvmgEmail) effectiveRoles = ['member'];
+
+    const isAdmin      = effectiveRoles.includes('admin') || BOOTSTRAP_ADMINS.includes(email.toLowerCase());
     const hasFullAccess = isAdmin || effectiveRoles.some(r => r !== 'sales');
     const isSales       = (effectiveRoles.includes('sales') || legacyRole === 'sales') && !hasFullAccess;
 
     // Build the Set of allowed tab IDs.
     // Start from role defaults, then apply per-tool overrides.
     let baseAllowed;
-    if (isOvmgEmail || effectiveRoles.includes('admin')) {
-      // Admin / OVMG team gets everything by role
+    if (isAdmin) {
       baseAllowed = new Set(ALL_TABS);
     } else {
       baseAllowed = new Set(

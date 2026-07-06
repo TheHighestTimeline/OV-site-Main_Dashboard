@@ -1,7 +1,7 @@
 // audio-logs-update — PATCH: update status / review notes on an audio_log.
 // Body: { id, status, review_notes, parsed_actions }
 // Auth required. Admin required to update senior_partner logs.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

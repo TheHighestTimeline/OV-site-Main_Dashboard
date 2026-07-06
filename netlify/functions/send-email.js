@@ -3,7 +3,7 @@
 // with X-Sent-By header tracking which team member actually sent it.
 import { gmail } from './_gmail.js';
 import { requireAuth, getUser } from './_auth.js';
-import { CORS, ok, err } from './_notion.js';
+import { CORS, ok, err } from './_http.js';
 
 // Email always sends from the SHARED system account (env GMAIL_REFRESH_TOKEN /
 // GMAIL_SENDER — e.g. nathan@onevibemediagroup.com), NOT a user's personally

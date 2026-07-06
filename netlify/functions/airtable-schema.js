@@ -8,7 +8,7 @@
 // Returns: { tables: [{ id, name, fields: [{ id, name, type }] }] }
 
 import { airtableMeta } from './_airtable.js';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 export const handler = async (event) => {

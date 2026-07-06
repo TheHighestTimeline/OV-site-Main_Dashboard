@@ -4,7 +4,7 @@
 // see raw record IDs, so — same approach activities-list.js already uses —
 // this fetches all Activities and filters client-side on the Contact array.
 import { airtableList, fromAirtableRecord } from './_airtable.js';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 const TABLE = () => process.env.AIRTABLE_TABLE_ACTIVITIES || 'Activities';

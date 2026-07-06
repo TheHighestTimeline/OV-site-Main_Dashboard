@@ -1,7 +1,7 @@
 // Fetches a full Gmail thread with all message bodies. Marks thread as read.
 import { gmail, extractBody, getHeader } from './_gmail.js';
 import { requireAuth } from './_auth.js';
-import { CORS, ok, err } from './_notion.js';
+import { CORS, ok, err } from './_http.js';
 
 // Walk the MIME payload tree and collect attachment parts.
 function extractAttachments(payload, messageId, result = []) {

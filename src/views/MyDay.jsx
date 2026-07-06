@@ -3,6 +3,7 @@ import { C, SERIF, SANS, MONO, prBg, prFg } from '../constants.js';
 import { Tag, Eyebrow, Btn, Spinner } from '../components/UI.jsx';
 import { getTasks, getContacts, parseVoice, updateTask, createTask, createContact, updateContact, transcribeAudio, createAudioLog } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
+import SuggestedMoves from '../components/SuggestedMoves.jsx';
 
 // ── Waveform canvas drawn from AnalyserNode data ──────────────────────────────
 function Waveform({ analyser, active, color = C.acc }) {
@@ -471,6 +472,9 @@ export default function MyDay({ user, showToast }) {
       <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 26 : 38, letterSpacing: '-.025em', margin: '0 0 20px', color: C.ink9, lineHeight: 1 }}>
         My Day
       </h1>
+
+      {/* §7: AI-ranked outreach suggestions (contact-prioritize) */}
+      <SuggestedMoves contacts={contacts} showToast={showToast} />
 
       {error && (
         <div style={{ background: C.redS, border: `1px solid ${C.red}`, borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: C.red, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

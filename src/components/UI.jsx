@@ -43,6 +43,171 @@ export class ErrorBoundary extends Component {
   }
 }
 
+// ── FilterPills (2026-07 audit §2.3) ─────────────────────────────────────────
+// THE canonical pill filter row — previously copy-pasted with slight drift in
+// Opportunities, Tasks, References, Review, Contacts. options: [{value,label,
+// color?}] or plain strings. Use everywhere a row of toggle pills is needed.
+export function FilterPills({ options, value, onChange, sx = {} }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', ...sx }}>
+      {options.map(opt => {
+        const o = typeof opt === 'string' ? { value: opt, label: opt } : opt;
+        const on = value === o.value;
+        const color = o.color || C.ink9;
+        return (
+          <button key={o.value} onClick={() => onChange(o.value)} style={{
+            background: on ? (o.color ? color + '18' : C.ink9) : C.bg,
+            color: on ? (o.color ? color : C.bg) : C.ink5,
+            border: `1px solid ${on ? color : C.cr3}`, borderRadius: 999,
+            padding: '4px 11px', fontSize: 11, fontFamily: SANS, cursor: 'pointer',
+            whiteSpace: 'nowrap', fontWeight: on ? 600 : 400,
+          }}>{o.label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── FilterDropdown (2026-07 UI pass) ─────────────────────────────────────────
+// THE canonical filter control for Tasks/Kanban and any view with more than a
+// couple of options. A compact pill trigger ("Priority · High ▾") that opens a
+// smooth dropdown panel — replaces the long scrolling pill rows. Highlights
+// when a non-default value is active. options: strings or {v, l, color?}.
+export function FilterDropdown({ label, value, onChange, options, allValue = 'All', sx = {} }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onEsc = e => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onEsc);
+    return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onEsc); };
+  }, [open]);
+
+  const norm    = options.map(o => (typeof o === 'string' ? { v: o, l: o } : o));
+  const current = norm.find(o => o.v === value);
+  const active  = value !== allValue && value != null && value !== '';
+  const accent  = (current && current.color) || C.acc;
+
+  return (
+    <div ref={ref} style={{ position: 'relative', flexShrink: 0, ...sx }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 7,
+          padding: '6px 12px', borderRadius: 999,
+          border: `1px solid ${active ? accent : C.cr3}`,
+          background: active ? accent + '14' : C.bg2,
+          color: active ? accent : C.ink5,
+          fontFamily: SANS, fontSize: 12, fontWeight: active ? 600 : 400,
+          cursor: 'pointer', whiteSpace: 'nowrap', maxWidth: 230,
+          transition: 'border-color .15s, background .15s, color .15s',
+        }}
+      >
+        <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: active ? accent : C.ink3 }}>
+          {label}
+        </span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {active ? (current?.l ?? String(value)) : (norm.find(o => o.v === allValue)?.l || 'All')}
+        </span>
+        <span style={{ fontSize: 8, opacity: .7, display: 'inline-block', transition: 'transform .15s', transform: open ? 'rotate(180deg)' : 'none' }}>▼</span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 240,
+          background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 12,
+          boxShadow: '0 12px 40px rgba(0,0,0,.16)', padding: 6,
+          minWidth: 190, maxHeight: 320, overflowY: 'auto',
+          animation: 'ovmgDropIn .13s ease',
+        }}>
+          <style>{`@keyframes ovmgDropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }`}</style>
+          <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: C.ink3, padding: '5px 10px 3px' }}>
+            {label}
+          </div>
+          {norm.map(o => {
+            const on = o.v === value;
+            const oc = o.color || C.ink9;
+            return (
+              <button
+                key={String(o.v)}
+                onClick={() => { onChange(o.v); setOpen(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                  padding: '7px 10px', border: 'none', borderRadius: 8, textAlign: 'left',
+                  background: on ? (o.color ? oc + '16' : C.bg2) : 'transparent',
+                  color: on ? C.ink9 : C.ink5, fontFamily: SANS, fontSize: 13,
+                  fontWeight: on ? 600 : 400, cursor: 'pointer',
+                }}
+                onMouseEnter={e => { if (!on) e.currentTarget.style.background = C.bg2; }}
+                onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent'; }}
+              >
+                {o.color && <span style={{ width: 8, height: 8, borderRadius: '50%', background: o.color, flexShrink: 0 }} />}
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.l}</span>
+                {on && <span style={{ color: o.color || C.acc, fontSize: 12 }}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── FilterBar — dropdown row + active count + one-click clear ────────────────
+// Wrap FilterDropdowns in this to get a "Clear ✕" button whenever any filter
+// is off its default. filters: [{ value, defaultValue = 'All', reset }].
+export function FilterBar({ children, filters = [], sx = {} }) {
+  const dirty = filters.filter(f => f.value !== (f.defaultValue ?? 'All'));
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 18, ...sx }}>
+      {children}
+      {dirty.length > 0 && (
+        <button
+          onClick={() => dirty.forEach(f => f.reset(f.defaultValue ?? 'All'))}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 11px',
+            borderRadius: 999, border: 'none', background: 'transparent',
+            color: C.ink3, fontFamily: SANS, fontSize: 11, cursor: 'pointer',
+            textDecoration: 'underline', textUnderlineOffset: 3,
+          }}
+        >
+          Clear {dirty.length} filter{dirty.length === 1 ? '' : 's'} ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── PageHeader (2026-07 audit §2.3) ──────────────────────────────────────────
+// Standard view header: eyebrow + serif title + optional subtitle + actions.
+export function PageHeader({ eyebrow, title, sub, actions, isMobile = false }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+      <div>
+        {eyebrow && <Eyebrow>{eyebrow}</Eyebrow>}
+        <h1 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 27 : 36, letterSpacing: '-.025em', margin: 0, color: C.ink9, lineHeight: 1 }}>
+          {title}
+        </h1>
+        {sub && <div style={{ fontSize: 13, color: C.ink5, marginTop: 6 }}>{sub}</div>}
+      </div>
+      {actions && <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>{actions}</div>}
+    </div>
+  );
+}
+
+// ── Card (2026-07 audit §2.3) ────────────────────────────────────────────────
+// Standard bordered card container.
+export function Card({ children, pad = '16px 18px', sx = {} }) {
+  return (
+    <div style={{ background: C.bg, border: `1px solid ${C.cr2}`, borderRadius: 12, padding: pad, ...sx }}>
+      {children}
+    </div>
+  );
+}
+
 // ── Tag ───────────────────────────────────────────────────────────────────────
 export function Tag({ children, bg = C.grS, fg = C.ink5 }) {
   return (
@@ -161,7 +326,11 @@ export function Modal({ title, onClose, children }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 16 }}>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(14,16,20,.5)', backdropFilter: 'blur(4px)' }} />
+      <style>{`
+        @keyframes ovmgFade   { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes ovmgPop    { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+      `}</style>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(14,16,20,.5)', backdropFilter: 'blur(4px)', animation: 'ovmgFade .15s ease' }} />
       <div style={{
         position: 'relative', background: C.bg,
         borderRadius: isMobile ? 0 : 16,
@@ -171,6 +340,7 @@ export function Modal({ title, onClose, children }) {
         height: isMobile ? '100vh' : 'auto',
         overflowY: 'auto',
         boxShadow: isMobile ? 'none' : '0 24px 60px rgba(0,0,0,.4)',
+        animation: 'ovmgPop .18s cubic-bezier(.2,.9,.3,1)',
       }}>
         <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: C.ink3, cursor: 'pointer' }}>×</button>
         <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 19 : 22, letterSpacing: '-.02em', margin: '0 0 16px', color: C.ink9 }}>{title}</h2>
@@ -290,7 +460,12 @@ export function Drawer({ title, sub, onClose, children }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 150 }}>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(14,16,20,.4)', backdropFilter: 'blur(3px)' }} />
+      <style>{`
+        @keyframes ovmgFade    { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes ovmgSlideIn { from { transform: translateX(60px); opacity: 0; } to { transform: none; opacity: 1; } }
+        @keyframes ovmgSlideUp { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+      `}</style>
+      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(14,16,20,.4)', backdropFilter: 'blur(3px)', animation: 'ovmgFade .15s ease' }} />
       <div style={{
         position: 'absolute', top: 0, right: 0, bottom: 0,
         width: isMobile ? '100%' : isTablet ? 'min(560px,100%)' : 'min(480px,100%)',
@@ -298,6 +473,7 @@ export function Drawer({ title, sub, onClose, children }) {
         background: C.bg, boxShadow: '0 0 60px rgba(0,0,0,.35)',
         padding: isMobile ? '20px 16px 80px' : 24,
         overflowY: 'auto',
+        animation: `${isMobile ? 'ovmgSlideUp' : 'ovmgSlideIn'} .2s cubic-bezier(.2,.9,.3,1)`,
       }}>
         <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 24, color: C.ink3, cursor: 'pointer' }}>×</button>
         {sub && <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Detail</div>}
@@ -310,17 +486,124 @@ export function Drawer({ title, sub, onClose, children }) {
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
+// 2026-07 UI pass: msg can be a string OR { text, actionLabel, onAction } —
+// action toasts (e.g. "Moved to Proposal · Undo") stay up longer and slide in.
 export function Toast({ msg, onDone }) {
-  useEffect(() => { const t = setTimeout(onDone, 2800); return () => clearTimeout(t); });
+  const obj    = typeof msg === 'string' ? { text: msg } : (msg || {});
+  const hasAct = !!(obj.actionLabel && obj.onAction);
+  useEffect(() => { const t = setTimeout(onDone, hasAct ? 6000 : 2800); return () => clearTimeout(t); });
   return (
     <div style={{
       position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
-      background: C.ink9, color: C.bg, padding: '10px 20px', borderRadius: 10,
+      background: C.ink9, color: C.bg, padding: hasAct ? '9px 12px 9px 20px' : '10px 20px', borderRadius: 10,
       fontSize: 13, boxShadow: '0 8px 32px rgba(0,0,0,.4)', zIndex: 300,
-      fontFamily: SANS, maxWidth: 320, textAlign: 'center',
+      fontFamily: SANS, maxWidth: 380, textAlign: 'center',
+      display: 'flex', alignItems: 'center', gap: 12,
+      animation: 'ovmgToastIn .18s ease',
     }}>
-      {msg}
+      <style>{`@keyframes ovmgToastIn { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }`}</style>
+      <span>{obj.text}</span>
+      {hasAct && (
+        <button
+          onClick={() => { try { obj.onAction(); } finally { onDone(); } }}
+          style={{
+            background: 'rgba(255,255,255,.14)', border: 'none', color: C.acc,
+            fontFamily: SANS, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+            padding: '5px 12px', borderRadius: 7, whiteSpace: 'nowrap',
+          }}
+        >
+          {obj.actionLabel}
+        </button>
+      )}
     </div>
+  );
+}
+
+// ── Skeleton (2026-07 UI pass) ───────────────────────────────────────────────
+// Shimmering placeholder blocks shown on FIRST load (cached revisits render
+// real data instantly via lib/cache.js). Compose freely: <Skeleton h={14} w="60%" />
+export function Skeleton({ h = 12, w = '100%', r = 6, sx = {} }) {
+  return (
+    <div style={{
+      height: h, width: w, borderRadius: r,
+      background: `linear-gradient(90deg, ${C.cr1} 25%, ${C.cr2} 50%, ${C.cr1} 75%)`,
+      backgroundSize: '400px 100%',
+      animation: 'ovmgShimmer 1.3s ease-in-out infinite',
+      ...sx,
+    }}>
+      <style>{`@keyframes ovmgShimmer { from { background-position: -400px 0; } to { background-position: 400px 0; } }`}</style>
+    </div>
+  );
+}
+
+// Ready-made skeleton layouts
+export function SkeletonRows({ rows = 6 }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '10px 14px', border: `1px solid ${C.cr1}`, borderRadius: 10 }}>
+          <Skeleton h={28} w={28} r={14} sx={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <Skeleton h={12} w={`${45 + (i * 13) % 40}%`} />
+            <Skeleton h={9} w={`${20 + (i * 7) % 25}%`} />
+          </div>
+          <Skeleton h={18} w={64} r={999} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function SkeletonKanban({ lanes = 5 }) {
+  return (
+    <div style={{ display: 'flex', gap: 10, overflow: 'hidden' }}>
+      {Array.from({ length: lanes }).map((_, i) => (
+        <div key={i} style={{ flex: '0 0 220px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <Skeleton h={34} r="8px 8px 0 0" />
+          {Array.from({ length: 2 + (i % 3) }).map((_, j) => (
+            <div key={j} style={{ border: `1px solid ${C.cr1}`, borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <Skeleton h={12} w="80%" />
+              <Skeleton h={9} w="45%" />
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── EmptyState (2026-07 UI pass) ─────────────────────────────────────────────
+export function EmptyState({ icon = '◇', title, body, actionLabel, onAction }) {
+  return (
+    <div style={{ padding: '44px 24px', textAlign: 'center', background: C.bg2, border: `1px dashed ${C.cr3}`, borderRadius: 14 }}>
+      <div style={{ fontFamily: SERIF, fontSize: 30, color: C.acc, marginBottom: 10 }}>{icon}</div>
+      <div style={{ fontFamily: SERIF, fontSize: 17, color: C.ink9, marginBottom: 6 }}>{title}</div>
+      {body && <p style={{ fontSize: 13, color: C.ink5, lineHeight: 1.55, margin: '0 auto', maxWidth: 380 }}>{body}</p>}
+      {actionLabel && onAction && (
+        <div style={{ marginTop: 16 }}><Btn onClick={onAction}>{actionLabel}</Btn></div>
+      )}
+    </div>
+  );
+}
+
+// ── Avatar (2026-07 UI pass) ─────────────────────────────────────────────────
+// Deterministic-color initials avatar for contacts/owners.
+const AVATAR_COLORS = ['#d96b3a', '#2c5d8a', '#2f7d5f', '#b48a1e', '#7c3d8f', '#3a7d44', '#8a5c2c', '#5c2c8a'];
+export function Avatar({ name = '', size = 28, sx = {} }) {
+  const initials = String(name).trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+  let hash = 0;
+  for (const ch of String(name)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const color = AVATAR_COLORS[hash % AVATAR_COLORS.length];
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      background: color + '22', color, border: `1px solid ${color}40`,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      fontFamily: SANS, fontSize: size * 0.38, fontWeight: 700, letterSpacing: '.02em',
+      ...sx,
+    }}>
+      {initials}
+    </span>
   );
 }
 
@@ -368,7 +651,10 @@ export function VoiceMic({ label = 'Tap to speak', onTranscript, size = 72 }) {
     setErr(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimes  = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg'];
+      // iOS FIX (§1.2): include audio/mp4 — it's the ONLY format iPhone Safari
+      // supports; without it the blob was mislabeled as webm and transcription
+      // failed server-side.
+      const mimes  = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/ogg','audio/mp4'];
       const mime   = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
       chunks.current = [];
       const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});

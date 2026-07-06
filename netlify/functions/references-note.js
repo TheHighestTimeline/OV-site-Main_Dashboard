@@ -5,7 +5,7 @@
 // tab always claimed "saved" even though nothing was written — fixed both:
 // repointed at the real Activities table, and the catch block now reports
 // the real failure instead of lying about success.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 import { airtableCreate } from './_airtable.js';
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { C, SERIF, SANS, MONO, RELATES, stBg, stFg, fmtR } from '../constants.js';
-import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, Spinner } from '../components/UI.jsx';
+import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, Spinner, Avatar, SkeletonRows } from '../components/UI.jsx';
+import { cacheGet, cacheSet } from '../lib/cache.js';
 import { getContacts, createContact, updateContact, mergeContacts, parseVoice, getAirtableSchema, getAppState, setAppState } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import { companyNameMatchesSlug } from '../constants/roles.js';
@@ -88,12 +89,15 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
   const [prioritizing,     setPrioritizing]     = useState(false);
   const [priorityResult,   setPriorityResult]   = useState(null);   // { ranked: [...] } | 'error'
 
-  const loadContacts = useCallback(() =>
-    getContacts()
-      .then(setContacts)
+  // 2026-07 UI pass: cached contacts render instantly; fresh data follows.
+  const loadContacts = useCallback(() => {
+    const cached = cacheGet('contacts');
+    if (cached) { setContacts(cached); setLoading(false); }
+    return getContacts()
+      .then(data => { cacheSet('contacts', data); setContacts(data); })
       .catch(e => showToast('Could not load contacts: ' + e.message))
-      .finally(() => setLoading(false)),
-  [showToast]);
+      .finally(() => setLoading(false));
+  }, [showToast]);
   useEffect(() => { loadContacts(); }, [loadContacts]);
 
   // Pinned contacts — persisted in the shared app-state store (syncs across devices).
@@ -394,7 +398,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
 
       {/* Table */}
       {loading ? (
-        <div style={{ padding: 32, textAlign: 'center', color: C.ink3 }}>Loading contacts…</div>
+        <SkeletonRows rows={8} />
       ) : filtered.length === 0 ? (
         <div style={{ padding: 48, textAlign: 'center', color: C.ink3, background: C.bg2, borderRadius: 12 }}>
           <div style={{ fontSize: 32, marginBottom: 10, opacity: .3 }}>◉</div>
@@ -437,15 +441,18 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
                         onChange={() => setSelIds(prev => prev.includes(c.id) ? prev.filter(x => x !== c.id) : [...prev, c.id])} />
                     </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: SERIF, fontWeight: 500, fontSize: 14, color: C.ink9 }}>
-                      <span onClick={e => { e.stopPropagation(); togglePin(c.id); }} title={pins.includes(c.id) ? 'Unpin' : 'Pin'}
-                        style={{ color: pins.includes(c.id) ? C.yel : C.cr3, cursor: 'pointer', marginRight: 6, fontSize: 13 }}>★</span>
-                      {flag && <span title="Needs follow-up" style={{ color: C.red, marginRight: 6 }}>⚑</span>}{c.name}
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <span onClick={e => { e.stopPropagation(); togglePin(c.id); }} title={pins.includes(c.id) ? 'Unpin' : 'Pin'}
+                          style={{ color: pins.includes(c.id) ? C.yel : C.cr3, cursor: 'pointer', fontSize: 13 }}>★</span>
+                        <Avatar name={c.name} size={26} />
+                        <span>{flag && <span title="Needs follow-up" style={{ color: C.red, marginRight: 5 }}>⚑</span>}{c.name}</span>
+                      </span>
                     </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>
                       {(c.companies || []).filter(co => co.id).length
                         ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>{c.companies.filter(co => co.id).map(co => (
                             <button key={co.id} onClick={e => { e.stopPropagation(); setActiveCompany({ id: co.id, name: co.name || 'Company' }); }} title="Open company snapshot"
-                              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontFamily: SANS, cursor: 'pointer', background: C.accS, color: C.accD, border: `1px solid #ecd1bc` }}>
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 999, fontSize: 11, fontFamily: SANS, cursor: 'pointer', background: C.accS, color: C.accD, border: `1px solid ${C.acc}30` }}>
                               {co.name || 'Company'} <span style={{ fontSize: 9, opacity: .7 }}>↗</span>
                             </button>
                           ))}</div>
@@ -453,8 +460,16 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
                     </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontSize: 13, color: C.ink7 }}>{c.role || '—'}</td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}><div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>{(c.relatesTo || []).map(r => <Tag key={r} bg="transparent" fg={C.ink5}>{r}</Tag>)}</div></td>
-                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.email || '—'}</td>
-                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.phone || '—'}</td>
+                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: C.ink5 }}>
+                      {c.email
+                        ? <a href={`mailto:${c.email}`} onClick={e => e.stopPropagation()} title="Email" style={{ color: C.blu, textDecoration: 'none' }}>✉ {c.email}</a>
+                        : '—'}
+                    </td>
+                    <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, fontSize: 11, color: C.ink5 }}>
+                      {c.phone
+                        ? <a href={`tel:${c.phone}`} onClick={e => e.stopPropagation()} title="Call" style={{ color: C.blu, textDecoration: 'none' }}>☏ {c.phone}</a>
+                        : '—'}
+                    </td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, whiteSpace: 'nowrap' }}><ContactBadge c={c} compact /></td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}>{c.status && <Tag bg={stBg(c.status)} fg={stFg(c.status)}>{c.status}</Tag>}</td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}>{c.type && <Tag bg="transparent" fg={C.ink5}>{c.type}</Tag>}</td>

@@ -16,6 +16,26 @@ function ThemeRoot({ children }) {
   return children;
 }
 
+// ── Error buffer for bug reports (2026-07 audit §2.4) ────────────────────────
+// Keeps the last ~20 console/uncaught errors in memory so the "Report a bug"
+// form can attach them. No network calls; purely local until a report is sent.
+window.__ovmgErrors = [];
+const pushErr = (msg) => {
+  try {
+    window.__ovmgErrors.push(`[${new Date().toISOString()}] ${String(msg).slice(0, 500)}`);
+    if (window.__ovmgErrors.length > 20) window.__ovmgErrors.shift();
+  } catch { /* never let error capture cause errors */ }
+};
+window.addEventListener('error', e => pushErr(e.message + (e.filename ? ` @ ${e.filename}:${e.lineno}` : '')));
+window.addEventListener('unhandledrejection', e => pushErr('Unhandled promise rejection: ' + (e.reason?.message || e.reason)));
+
+// ── PWA service worker (§3.3) — network-first, install-enabling only ─────────
+if ('serviceWorker' in navigator && !import.meta.env.DEV) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 if (!PUBLISHABLE_KEY) {

@@ -1,0 +1,17 @@
+{
+  "name": "OneVibe Internal Hub",
+  "short_name": "OneVibe",
+  "description": "OneVibe Media Group internal dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1d23",
+  "theme_color": "#1a1d23",
+  "icons": [
+    {
+      "src": "/ovmg-logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

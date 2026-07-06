@@ -1,6 +1,6 @@
 // references-unpin — remove a user-level pin on a resource.
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

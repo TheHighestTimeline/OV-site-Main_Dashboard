@@ -4,7 +4,7 @@
 // Optional body: { testWrite: true } to also test write+delete on a live table.
 
 import { requireAuth } from './_auth.js';
-import { corsFor } from './_notion.js';
+import { corsFor } from './_http.js';
 
 // ── Required core env vars ────────────────────────────────────────────────────
 const REQUIRED_CORE = ['AIRTABLE_TOKEN', 'AIRTABLE_BASE_ID'];

@@ -20,7 +20,7 @@
 //   }
 
 import { google } from 'googleapis';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getActiveGoogleClient } from './_google.js';
 import { logAudit } from './_audit.js';

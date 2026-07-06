@@ -2,10 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>OneVibe Internal Hub</title>
     <meta name="description" content="OneVibe Media Group internal dashboard" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◐</text></svg>" />
+    <!-- PWA (2026-07 audit §3.3): installable on iPhone/Android home screens -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1d23" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="OneVibe" />
+    <link rel="apple-touch-icon" href="/ovmg-logo.png" />
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -27,6 +34,23 @@
          every color instead of theming). */
       html.ovmg-dark, html.ovmg-dark body { background: #0e1014; }
       html.ovmg-dark ::-webkit-scrollbar-thumb { background: #3a434f; }
+
+      /* ── Mobile fixes (2026-07 audit §3.3) ─────────────────────────────────
+         iOS Safari auto-zooms the whole viewport when a focused input's font
+         is under 16px — every form in the app used 13px, so tapping any field
+         zoomed the page. Force 16px on coarse-pointer/small screens; desktop
+         is unaffected. Also give buttons a minimum tap target. */
+      @media (max-width: 768px) {
+        input, select, textarea { font-size: 16px !important; }
+      }
+      @media (pointer: coarse) {
+        input, select, textarea { font-size: 16px !important; }
+      }
+
+      /* Visible keyboard focus (2026-07 audit §2.3) — inline styles can't
+         express :focus-visible, so a single global rule covers every control. */
+      :focus-visible { outline: 2px solid #d96b3a; outline-offset: 2px; border-radius: 4px; }
+      :focus:not(:focus-visible) { outline: none; }
     </style>
     <script>
       /* Apply saved theme before first paint to avoid a light flash. */

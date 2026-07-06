@@ -1,7 +1,7 @@
 // Dedicated endpoint for updating just the roles of an existing Clerk user.
 // Phase 7+ audit fix H-6: writes to audit_log on role change.
 import { createClerkClient } from '@clerk/backend';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin, getUser } from './_auth.js';
 import { logAudit } from './_audit.js';
 

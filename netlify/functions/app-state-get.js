@@ -1,7 +1,7 @@
 // Generic key/value GET — returns the stored JSON for a key (or null).
 import { requireAuth } from './_auth.js';
 import { getSupabase } from './_supabase.js';
-import { CORS } from './_notion.js';
+import { CORS } from './_http.js';
 
 const ok  = (body) => ({ statusCode: 200, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const err = (msg, code = 500) => ({ statusCode: code, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: msg }) });

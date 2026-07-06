@@ -6,7 +6,7 @@
 // Categories use a stable text id (slug) so resources can reference them
 // without breaking when label changes.
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

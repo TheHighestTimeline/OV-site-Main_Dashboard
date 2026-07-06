@@ -1,7 +1,7 @@
 // Returns Gmail labels (folders) for the sidebar.
 import { gmail } from './_gmail.js';
 import { requireAuth } from './_auth.js';
-import { CORS, ok, err } from './_notion.js';
+import { CORS, ok, err } from './_http.js';
 
 // Labels to always show first, in this order
 const PINNED = ['INBOX', 'SENT', 'DRAFTS', 'STARRED', 'SPAM', 'TRASH'];

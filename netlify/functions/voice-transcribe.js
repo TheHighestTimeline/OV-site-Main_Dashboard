@@ -6,7 +6,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { createReadStream } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { logUsage } from './_usage.js';
 
@@ -26,8 +26,17 @@ export const handler = async (event, context) => {
     const model  = process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe';
 
     // Decode base64 → temp file → ReadStream (avoids browser-only File/Blob APIs)
-    const buf = Buffer.from(audio, 'base64');
-    const ext = (mimeType || 'audio/webm').includes('ogg') ? 'ogg' : 'webm';
+    // iOS FIX (2026-07 audit §1.2): iPhone Safari's MediaRecorder records
+    // audio/mp4 — previously that was written as .webm, which OpenAI failed to
+    // decode, silently breaking voice on every iPhone. Map all common
+    // containers to a correct extension.
+    const buf  = Buffer.from(audio, 'base64');
+    const mime = (mimeType || 'audio/webm').toLowerCase();
+    const ext  =
+      mime.includes('mp4') || mime.includes('m4a') || mime.includes('aac') ? 'mp4' :
+      mime.includes('ogg')  ? 'ogg' :
+      mime.includes('mpeg') || mime.includes('mp3') ? 'mp3' :
+      mime.includes('wav')  ? 'wav' : 'webm';
     tmpPath = join(tmpdir(), `rec_${Date.now()}.${ext}`);
     await writeFile(tmpPath, buf);
 
@@ -44,20 +53,4 @@ export const handler = async (event, context) => {
         event, service: 'openai', surface: 'voice-transcribe',
         operation: 'audio.transcriptions.create',
         model: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe',
-        minutes: 0.5,  // rough placeholder — refine if response carries duration
-        user: u,
-      });
-    } catch (e) { /* swallow */ }
-
-    // response_format:'text' returns a plain string
-    const transcript = typeof transcription === 'string' ? transcription : transcription.text || '';
-
-    return ok({ transcript: transcript.trim() });
-  } catch (e) {
-    console.error('transcribe error:', e);
-    return err(500, e.message);
-  } finally {
-    // Always clean up the temp file
-    if (tmpPath) await unlink(tmpPath).catch(() => {});
-  }
-};
+        minutes: 0.5,  // rough placeholder — refine

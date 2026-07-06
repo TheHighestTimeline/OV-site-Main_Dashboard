@@ -14,7 +14,7 @@
 //     asset_tags      — comma-separated free-form tags
 //     image_url       — URL to an asset (becomes media_urls[0])
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 import crypto from 'crypto';

@@ -2,7 +2,7 @@
 // Body: { id, addLabelIds?, removeLabelIds? }
 import { gmail } from './_gmail.js';
 import { requireAuth } from './_auth.js';
-import { CORS, ok, err } from './_notion.js';
+import { CORS, ok, err } from './_http.js';
 
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };

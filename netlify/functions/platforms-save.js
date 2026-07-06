@@ -1,4 +1,4 @@
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 // V2: encrypt credentials and persist to Supabase. For now: 200 OK no-op.

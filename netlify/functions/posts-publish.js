@@ -1,4 +1,4 @@
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 // V2: publish to actual platforms (IG Graph, FB Graph, TikTok, YT Shorts, LinkedIn).

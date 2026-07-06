@@ -3,7 +3,7 @@
 // can click to sign in without a password. Token expires in 1 hour.
 // The admin copies the link and sends it to the user via any channel.
 import { createClerkClient } from '@clerk/backend';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin } from './_auth.js';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });

@@ -1,9 +1,13 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react';
 import { C, SERIF, SANS, MONO, getTheme, toggleTheme } from './constants.js';
-import { Toast, Drawer, Modal } from './components/UI.jsx';
+import { Toast, Drawer, Modal, ErrorBoundary } from './components/UI.jsx';
 import useIsMobile, { useDevice } from './hooks/useIsMobile.js';
 import { canAccess } from './lib/access.js';
-import { COMPANIES, COMPANY_META, COMPANY_SUBTAB_LABELS } from './constants/roles.js';
+import { COMPANY_META, COMPANY_SUBTAB_LABELS } from './constants/roles.js';
+import CompanyScopePill, { loadScope, saveScope } from './components/CompanyScopePill.jsx';
+import SearchModal from './components/SearchModal.jsx';
+import BugReport from './components/BugReport.jsx';
+import { countPendingReviews } from './api.js';
 
 // Overview is the default landing view, so it stays eagerly imported — code-
 // splitting the first screen the user sees would only add a spinner to the
@@ -34,6 +38,7 @@ const Booking       = lazy(() => import('./views/Booking.jsx'));
 const CostDashboard = lazy(() => import('./views/CostDashboard.jsx'));
 const AudioDump     = lazy(() => import('./views/AudioDump.jsx'));
 const CompanyView   = lazy(() => import('./views/CompanyView.jsx'));
+const Review        = lazy(() => import('./views/Review.jsx'));
 
 // ── URL ↔ view sync (§10: refresh stays on the current route) ─────────────────
 // The app routes off a single `view` string (e.g. 'tasks', 'company:ovm:tasks').
@@ -70,6 +75,7 @@ function AccessDenied() {
 // ── Top-level nav items ───────────────────────────────────────────────────────
 const NAV_META = [
   { id: 'overview',   icon: '◇', label: 'Overview'   },
+  { id: 'review',     icon: '☑', label: 'Review'     },
   { id: 'audio-dump', icon: '◎', label: 'Audio Dump', adminOnly: true },
   { id: 'contacts',   icon: '◉', label: 'Contacts'   },
   { id: 'tasks',      icon: '▤', label: 'Tasks'      },
@@ -81,85 +87,8 @@ const NAV_META = [
   // space — their routes still resolve below for deep links / Settings nav.
 ];
 
-// Sub-tab icons (shared with CompanyView)
-const SUBTAB_ICONS = {
-  contacts:   '◉',
-  tasks:      '▤',
-  kanban:     '▦',
-  opportunities: '◆',
-  drive:      '◫',
-  references: '⊞',
-  tools:      '⚒',
-  html:       '◧',
-  email:      '◈',
-};
-
-// ── Company section — collapsible (controlled) ────────────────────────────────
-function CompanySection({ slug, meta, activeView, onNavigate, isTablet, isOpen, onToggle }) {
-  const isCompanyActive = typeof activeView === 'string' && activeView.startsWith(`company:${slug}`);
-  const activeSubTab    = isCompanyActive ? activeView.split(':')[2] : null;
-
-  return (
-    <div>
-      {/* Company header row */}
-      <button
-        onClick={onToggle}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-          padding: '7px 10px', border: 'none',
-          background: isCompanyActive ? C.chromeBg2 : 'transparent',
-          color: isCompanyActive ? C.chromeFg : C.chromeMut,
-          fontSize: isTablet ? 12 : 13, borderRadius: 6, textAlign: 'left',
-          cursor: 'pointer', fontFamily: SANS, transition: 'all .15s ease',
-        }}
-      >
-        <span style={{
-          width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-          background: meta.color_hex,
-        }} />
-        <span style={{ flex: 1 }}>{meta.label}</span>
-        <span style={{
-          fontFamily: SERIF, fontSize: 10, color: C.chromeMut,
-          display: 'inline-block', transition: 'transform .15s',
-          transform: isOpen ? 'rotate(90deg)' : 'none',
-        }}>▶</span>
-      </button>
-
-      {/* Sub-tabs */}
-      {isOpen && (
-        <div style={{ paddingLeft: 14, display: 'flex', flexDirection: 'column', gap: 1, marginTop: 1 }}>
-          {meta.sub_tabs.map(tab => {
-            const isActive = activeSubTab === tab;
-            return (
-              <button
-                key={tab}
-                onClick={() => onNavigate(`company:${slug}:${tab}`)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '6px 10px', border: 'none',
-                  background: isActive ? meta.color_hex + '28' : 'transparent',
-                  color: isActive ? C.chromeFg : C.chromeMut,
-                  fontSize: isTablet ? 11 : 12, borderRadius: 5, textAlign: 'left',
-                  cursor: 'pointer', fontFamily: SANS, transition: 'all .15s ease',
-                  borderLeft: isActive ? `2px solid ${meta.color_hex}` : '2px solid transparent',
-                }}
-              >
-                <span style={{
-                  fontFamily: SERIF, fontSize: 11,
-                  color: isActive ? meta.color_hex : C.chromeMut,
-                  width: 12, textAlign: 'center',
-                }}>
-                  {SUBTAB_ICONS[tab] || '◇'}
-                </span>
-                {COMPANY_SUBTAB_LABELS[tab] || tab}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
+// (CompanySection accordion removed — §3.1: companies now live in the top-bar
+// scope pill, not the sidebar.)
 
 // Suspense fallback shown briefly while a lazily-loaded view chunk downloads.
 // Matches the app's loading style (the ◐ mark) and is centered in the content
@@ -208,6 +137,54 @@ export default function Dashboard({ user, onLogout }) {
   // Not persisted to the URL — a refresh lands on the route without the filter.
   const [viewParams, setViewParams] = useState(null);
 
+  // ── Global company scope (§3.1) — pill dropdown, persisted ────────────────
+  const [scope, _setScope] = useState(loadScope);
+  const setScope = useCallback((slug) => { _setScope(slug); saveScope(slug); }, []);
+
+  // ── Global search (Cmd/Ctrl-K) + g-shortcuts (2026-07 UI pass) ─────────────
+  // Press g then a letter to jump: g o Overview · g t Tasks · g k Kanban ·
+  // g c Contacts · g r Review · g m My Day. Ignored while typing in a field.
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    let goArmed = 0; // timestamp when 'g' was pressed
+    const isTyping = () => {
+      const el = document.activeElement;
+      return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+    };
+    const GO = { o: 'overview', t: 'tasks', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day' };
+    const onKey = e => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(o => !o);
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping()) return;
+      const k = e.key.toLowerCase();
+      if (k === 'g') { goArmed = Date.now(); return; }
+      if (goArmed && Date.now() - goArmed < 900 && GO[k]) {
+        e.preventDefault();
+        setView(GO[k]);
+      }
+      goArmed = 0;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setView]);
+
+  // ── Review queue badge (§4) — refresh every 5 min + on visit ──────────────
+  const [reviewCount, setReviewCount] = useState(0);
+  const canReview = canAccess(user, 'review');
+  useEffect(() => {
+    if (!canReview) return;
+    let alive = true;
+    const tick = () => countPendingReviews()
+      .then(r => { if (alive) setReviewCount(r.count || 0); })
+      .catch(() => {});
+    tick();
+    const t = setInterval(tick, 5 * 60 * 1000);
+    return () => { alive = false; clearInterval(t); };
+  }, [canReview, view]);
+
   // setView also writes the hash so the URL is the source of truth (§10).
   const setView = useCallback((next, params = null) => {
     _setView(next);
@@ -231,23 +208,6 @@ export default function Dashboard({ user, onLogout }) {
       window.removeEventListener('popstate', onRoute);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Accordion: only one company section open at a time
-  const COMPANY_STORAGE_KEY = 'sidebar_expanded_company';
-  const [expandedCompany, setExpandedCompany] = useState(() => {
-    try { return localStorage.getItem(COMPANY_STORAGE_KEY) || null; }
-    catch { return null; }
-  });
-  const handleCompanyToggle = useCallback((slug) => {
-    setExpandedCompany(prev => {
-      const next = prev === slug ? null : slug;
-      try {
-        if (next) { localStorage.setItem(COMPANY_STORAGE_KEY, next); }
-        else      { localStorage.removeItem(COMPANY_STORAGE_KEY); }
-      } catch {}
-      return next;
-    });
-  }, []);
 
   const showToast = m  => setToast(m);
   const closeOv   = () => setOv(null);
@@ -279,20 +239,22 @@ export default function Dashboard({ user, onLogout }) {
     const VIEWS = {
       'overview':   gateView('overview',   <Overview   {...ctx} />),
       'my-day':     gateView('my-day',     <MyDay      {...ctx} />),
+      'review':     gateView('review',     <Review     {...ctx} />),
       'audio-dump': user.isAdmin ? <AudioDump {...ctx} /> : <AccessDenied />,
-      'contacts':   gateView('contacts',   <Contacts   {...ctx} />),
-      'tasks':      gateView('tasks',      <Tasks      {...ctx} initialFilter={view === 'tasks' ? viewParams : null} />),
-      // Main Kanban — all companies' opportunities in one Notion-backed board
+      // §3.1: the global company scope filters every scoped view below.
+      'contacts':   gateView('contacts',   <Contacts   {...ctx} companyFilter={scope} />),
+      'tasks':      gateView('tasks',      <Tasks      {...ctx} companyFilter={scope} initialFilter={view === 'tasks' ? viewParams : null} />),
+      // Main Kanban — all companies' opportunities in one board
       // (internal/external + Kanban⇄List). Same data as each company's Kanban
       // tab, so cards created here surface on the matching company tab too.
-      'kanban':     gateView('kanban',     <Opportunities {...ctx} viewMode="kanban" allowViewToggle />),
+      'kanban':     gateView('kanban',     <Opportunities {...ctx} companyFilter={scope} viewMode="kanban" allowViewToggle />),
       'settings':   gateView('settings',   <Settings   {...ctx} onLogout={onLogout} />),
       'admin':      gateView('admin',      <Admin      {...ctx} />),
       'cost':       user.isAdmin ? <CostDashboard {...ctx} /> : <AccessDenied />,
       'websites':   gateView('websites',   <Websites   {...ctx} />),
       'booking':    gateView('booking',    <Booking    {...ctx} />),
       'tools':      gateView('tools',      <Tools      {...ctx} />),
-      'references': gateView('references', <References {...ctx} />),
+      'references': gateView('references', <References {...ctx} companyFilter={scope} />),
       'outreach':   gateView('outreach',   <Outreach   {...ctx} />),
       // Legacy direct routes — bookmarks / deep links still work
       'ncnda':      gateView('ncnda',      <Ncnda      {...ctx} />),
@@ -366,44 +328,29 @@ export default function Dashboard({ user, onLogout }) {
                 }}
               >
                 <span style={{ fontFamily: SERIF, fontSize: 13, color: isActive ? C.acc : C.chromeMut, width: 13, textAlign: 'center' }}>{item.icon}</span>
-                {item.label}
+                <span style={{ flex: 1 }}>{item.label}</span>
+                {item.id === 'review' && reviewCount > 0 && (
+                  <span style={{ fontFamily: MONO, fontSize: 9, fontWeight: 700, background: C.acc, color: '#fff', borderRadius: 999, padding: '1px 7px', flexShrink: 0 }}>
+                    {reviewCount > 99 ? '99+' : reviewCount}
+                  </span>
+                )}
               </button>
             );
           })}
         </nav>
       </div>
 
-      {/* Divider */}
-      <div style={{ height: 1, background: C.chromeBg2, margin: '6px 0 10px' }} />
-
-      {/* ── Companies section ── */}
-      <div style={{ flex: 1 }}>
-        <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.chromeMut, padding: '0 10px', marginBottom: 4 }}>
-          Companies
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {COMPANIES.map(slug => {
-            const meta = COMPANY_META[slug];
-            if (!meta) return null;
-            if (!canAccess(user, `company:${slug}`)) return null;
-            return (
-              <CompanySection
-                key={slug}
-                slug={slug}
-                meta={meta}
-                activeView={view}
-                onNavigate={handleNavClick}
-                isTablet={isTablet}
-                isOpen={expandedCompany === slug}
-                onToggle={() => handleCompanyToggle(slug)}
-              />
-            );
-          })}
-        </div>
-      </div>
+      {/* §3.1: companies were removed from the sidebar — the top-bar company
+          scope pill is now the single way to focus a company (less confusing,
+          shorter mobile menu). Company pages (HQ, tabs) open via the ⌂ button
+          in the pill dropdown or the hub button that appears when scoped.
+          Deep links (company:slug:tab) still resolve. */}
+      <div style={{ flex: 1 }} />
 
       {/* Account switcher + user info */}
       <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Bug report (§2.4) */}
+        <BugReport user={user} showToast={showToast} compact />
         {/* Dark mode toggle */}
         <button
           onClick={flipTheme}
@@ -462,8 +409,8 @@ export default function Dashboard({ user, onLogout }) {
             those views had no way back to the main sidebar. */}
         {isMobile && (
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '10px 14px', flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '10px 12px', flexShrink: 0,
             background: C.chromeBg, color: C.chromeFg,
           }}>
             <button onClick={() => setMenuOpen(true)}
@@ -475,9 +422,57 @@ export default function Dashboard({ user, onLogout }) {
                 <span style={{ display: 'block', height: 2, background: C.chromeFg, margin: '4px 0', borderRadius: 1 }} />
               </span>
             </button>
-            <span style={{ fontFamily: SERIF, fontSize: 17, fontWeight: 500 }}>OneVibe</span>
-            <span style={{ color: C.chromeMut, fontSize: 13, opacity: .6 }}>/</span>
-            <span style={{ fontSize: 13, color: C.chromeMut, fontFamily: SANS }}>{currentLabel}</span>
+            <span style={{ fontSize: 13, color: C.chromeMut, fontFamily: SANS, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{currentLabel}</span>
+            {/* §3.1: company scope pill — mobile (also the way to open a company hub) */}
+            <CompanyScopePill user={user} scope={scope} onChange={setScope} compact
+              onOpenCompany={slug => handleNavClick(`company:${slug}:hq`)} />
+            <button onClick={() => setSearchOpen(true)} aria-label="Search"
+              style={{ background: 'none', border: 'none', color: C.chromeMut, cursor: 'pointer', fontSize: 17, padding: 4, lineHeight: 1 }}>
+              ◎
+            </button>
+          </div>
+        )}
+
+        {/* Desktop top bar (§3.1) — global company scope + search */}
+        {!isMobile && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+            padding: isTablet ? '10px 22px' : '10px 30px',
+            borderBottom: `1px solid ${C.cr2}`, background: C.bg,
+          }}>
+            <CompanyScopePill user={user} scope={scope} onChange={setScope}
+              onOpenCompany={slug => handleNavClick(`company:${slug}:hq`)} />
+            {scope && (
+              <>
+                <button
+                  onClick={() => handleNavClick(`company:${scope}:hq`)}
+                  title={`Open the ${COMPANY_META[scope]?.label} hub (HQ, tabs)`}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+                    borderRadius: 999, border: `1px solid ${COMPANY_META[scope]?.color_hex || C.cr3}`,
+                    background: 'transparent', color: COMPANY_META[scope]?.color_hex || C.ink5,
+                    fontFamily: SANS, fontSize: 11, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                >
+                  ⌂ {COMPANY_META[scope]?.label} hub
+                </button>
+                <span style={{ fontSize: 11, color: C.ink3, fontFamily: SANS }}>
+                  Everything below is filtered to {COMPANY_META[scope]?.label}.
+                </span>
+              </>
+            )}
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={() => setSearchOpen(true)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px',
+                borderRadius: 999, border: `1px solid ${C.cr3}`, background: C.bg2,
+                color: C.ink3, fontFamily: SANS, fontSize: 12, cursor: 'pointer',
+              }}
+            >
+              ◎ Search
+              <span style={{ fontFamily: MONO, fontSize: 9, border: `1px solid ${C.cr3}`, borderRadius: 4, padding: '1px 5px' }}>⌘K</span>
+            </button>
           </div>
         )}
 
@@ -487,12 +482,50 @@ export default function Dashboard({ user, onLogout }) {
         <div style={{
           flex: 1, minHeight: 0, minWidth: 0, position: 'relative',
           overflowY: isFullBleed ? 'hidden' : 'auto',
-          padding: isFullBleed ? 0 : (isMobile ? '12px 14px 24px' : isTablet ? '20px 22px' : '24px 30px'),
+          // Mobile gets extra bottom padding so content clears the tab bar.
+          padding: isFullBleed ? 0 : (isMobile ? '12px 14px 84px' : isTablet ? '20px 22px' : '24px 30px'),
         }}>
-          <Suspense fallback={<ViewLoading />}>
-            {currentView}
-          </Suspense>
+          {/* §2.4: every view is wrapped in an ErrorBoundary (re-keyed per
+              route) so one crashed view never blanks the whole app. The inner
+              div fades each route in (2026-07 UI pass). */}
+          <ErrorBoundary key={view}>
+            <style>{`@keyframes ovmgViewIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }`}</style>
+            <div key={view} style={{ animation: 'ovmgViewIn .16s ease', height: isFullBleed ? '100%' : 'auto' }}>
+              <Suspense fallback={<ViewLoading />}>
+                {currentView}
+              </Suspense>
+            </div>
+          </ErrorBoundary>
         </div>
+
+        {/* Mobile bottom tab bar (§3.3) — the 4 most-used destinations */}
+        {isMobile && (
+          <nav style={{
+            position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 120,
+            display: 'flex', background: C.chromeBg,
+            borderTop: `1px solid ${C.chromeBg2}`,
+            paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          }}>
+            {[
+              { id: 'my-day',   icon: '☀', label: 'My Day' },
+              { id: 'tasks',    icon: '▤', label: 'Tasks' },
+              { id: 'contacts', icon: '◉', label: 'Contacts' },
+              { id: 'kanban',   icon: '▦', label: 'Kanban' },
+            ].filter(t => canAccess(user, t.id)).map(t => {
+              const active = view === t.id;
+              return (
+                <button key={t.id} onClick={() => handleNavClick(t.id)} style={{
+                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                  padding: '9px 4px 10px', background: 'none', border: 'none', cursor: 'pointer',
+                  color: active ? C.acc : C.chromeMut, fontFamily: SANS,
+                }}>
+                  <span style={{ fontFamily: SERIF, fontSize: 16, lineHeight: 1 }}>{t.icon}</span>
+                  <span style={{ fontSize: 10, fontWeight: active ? 600 : 400 }}>{t.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        )}
       </main>
 
       {ov && ov.kind === 'drawer' && (
@@ -502,6 +535,7 @@ export default function Dashboard({ user, onLogout }) {
         <Modal title={ov.title} onClose={closeOv}>{ov.body}</Modal>
       )}
       {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
+      {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} setView={setView} />}
     </div>
   );
 }

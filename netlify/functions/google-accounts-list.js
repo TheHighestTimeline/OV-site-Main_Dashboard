@@ -1,7 +1,7 @@
 // google-accounts-list — Phase 8.
 // Returns the list of Google accounts the authenticated user has connected.
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { listUserGoogleAccounts } from './_google.js';
 

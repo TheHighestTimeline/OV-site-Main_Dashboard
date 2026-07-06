@@ -1,5 +1,5 @@
 // posts-list — Phase 12. Lists posts for a client, optionally filtered.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

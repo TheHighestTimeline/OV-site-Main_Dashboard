@@ -1,7 +1,7 @@
 // Returns a safe list of team members (name + email) for the assignee dropdown.
 // Available to any authenticated user — no admin role required.
 import fetch from 'node-fetch';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 export const handler = async (event, context) => {

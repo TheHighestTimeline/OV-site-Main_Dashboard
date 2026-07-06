@@ -1,4 +1,4 @@
-import { CORS } from './_notion.js';
+import { CORS } from './_http.js';
 import { getSupabase } from './_supabase.js';
 import { google } from 'googleapis';
 import { getActiveGoogleClient } from './_google.js';

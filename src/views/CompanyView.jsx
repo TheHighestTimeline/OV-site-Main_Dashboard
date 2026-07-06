@@ -16,9 +16,11 @@ const OvmHtml        = lazy(() => import('./OvmHtml.jsx'));
 const Tools          = lazy(() => import('./Tools.jsx'));
 const Outreach       = lazy(() => import('./Outreach.jsx'));
 const DriveView      = lazy(() => import('./DriveView.jsx'));
+const CompanyHq      = lazy(() => import('./CompanyHq.jsx'));
 
 // ── Sub-tab icon map ──────────────────────────────────────────────────────────
 const SUBTAB_ICONS = {
+  hq:         '⌂',
   contacts:   '◉',
   activities: '☰',
   documents:  '⎘',
@@ -139,6 +141,13 @@ function SubTabContent({ slug, subTab, user, showToast, openOv, closeOv, setView
   const sharedProps = { user, showToast, openOv, closeOv, setView };
 
   switch (subTab) {
+    case 'hq':
+      return (
+        <Suspense fallback={<LoadingFallback />}>
+          <CompanyHq {...sharedProps} slug={slug} />
+        </Suspense>
+      );
+
     case 'contacts':
       return (
         <Suspense fallback={<LoadingFallback />}>

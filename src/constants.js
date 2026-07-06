@@ -24,8 +24,10 @@ const LIGHT = {
 const DARK = {
   // Text/chrome tokens flip from near-black → near-white (and keep their
   // light→dark ordering: ink9 = strongest).
-  ink9: '#f4f1ea', ink8: '#e7e3da', ink7: '#d3cec3', ink5: '#9aa1ad',
-  ink3: '#7e8794', ink2: '#5c6573',
+  // 2026-07 contrast pass: ink5/ink3 lifted slightly — secondary text and
+  // labels were dipping below comfortable contrast on the dark panels.
+  ink9: '#f4f1ea', ink8: '#e7e3da', ink7: '#d3cec3', ink5: '#a7aeba',
+  ink3: '#8d95a3', ink2: '#5c6573',
   // Surfaces/borders: dark panels, progressively lighter for borders.
   cr1: '#1b212b', cr2: '#2a313c', cr3: '#3a434f',
   bg: '#0e1014', bg2: '#161b22',

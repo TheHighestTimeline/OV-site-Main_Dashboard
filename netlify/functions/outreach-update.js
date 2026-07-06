@@ -1,5 +1,5 @@
 import { airtableGet, airtableUpdate, toAirtableFields, OUTREACH_MAP } from './_airtable.js';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 const TABLE = () => process.env.AIRTABLE_TABLE_OUTREACH || 'Outreach';

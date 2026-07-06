@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { C, SERIF, SANS, MONO, DB, STATUSES, prBg, prFg, stFg, dUntil, fmtD, fmtR } from '../constants.js';
-import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, PBar, useConfirm } from '../components/UI.jsx';
+import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, PBar, useConfirm, FilterDropdown, FilterBar, SkeletonRows } from '../components/UI.jsx';
+import { cacheGet, cacheSet } from '../lib/cache.js';
 import { getTasks, createTask, updateTask, deleteTask, getTaskNotes, parseVoice, uploadFile, getOpportunities,
          getProjects, getClients, getAirtableSchema, airtableRecordUrl } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
@@ -147,12 +148,16 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
 
   const myFirst = user.fullName.split(' ')[0].toLowerCase();
 
-  const load = useCallback(() =>
-    getTasks()
-      .then(setTasks)
+  // 2026-07 UI pass: stale-while-revalidate — cached tasks render instantly,
+  // fresh data lands in the background. Skeleton only on true first load.
+  const load = useCallback(() => {
+    const cached = cacheGet('tasks');
+    if (cached) { setTasks(cached); setLoading(false); }
+    return getTasks()
+      .then(data => { cacheSet('tasks', data); setTasks(data); })
       .catch(e => showToast('Could not load tasks: ' + e.message))
-      .finally(() => setLoading(false)),
-  [showToast]);
+      .finally(() => setLoading(false));
+  }, [showToast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -1062,16 +1067,39 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
     );
   }
 
+  // ── Saved views (2026-07 UI pass) ───────────────────────────────────────────
+  // A named snapshot of the whole filter combo, stored per scope (main page vs
+  // each company page) in localStorage and applied with one click.
+  const VIEWS_KEY = `ovmg.tasks.savedViews.${companyFilter || 'all'}`;
+  const [savedViews, setSavedViews] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(VIEWS_KEY) || '[]'); } catch { return []; }
+  });
+  const persistViews = (v) => { setSavedViews(v); try { localStorage.setItem(VIEWS_KEY, JSON.stringify(v)); } catch { /* ignore */ } };
+  const currentFilters = { tfCo, tfAs, tfPr, tfDue, tfDeal, tfWork, tfSection };
+  const filtersDirty = Object.values(currentFilters).some(v => v !== 'All');
+  const saveCurrentView = () => {
+    const name = window.prompt('Name this view (e.g. "My overdue OVM"):');
+    if (!name?.trim()) return;
+    persistViews([...savedViews.filter(v => v.name !== name.trim()), { name: name.trim(), f: currentFilters }]);
+    showToast(`View "${name.trim()}" saved ★`);
+  };
+  const applyView = (v) => {
+    setTfCo(v.f.tfCo ?? 'All'); setTfAs(v.f.tfAs ?? 'All'); setTfPr(v.f.tfPr ?? 'All');
+    setTfDue(v.f.tfDue ?? 'All'); setTfDeal(v.f.tfDeal ?? 'All'); setTfWork(v.f.tfWork ?? 'All');
+    setTfSection(v.f.tfSection ?? 'All');
+  };
+  const deleteView = (name) => persistViews(savedViews.filter(v => v.name !== name));
+
+  // 2026-07 UI pass: filters are dropdowns now (FilterDropdown), not
+  // horizontally-scrolling pill rows. Same props, so call sites are unchanged.
   function FilterRow({ label, value, onChange, options }) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 8, overflowX: 'auto', maxWidth: '100%' }}>
-        <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, flexShrink: 0 }}>{label}</span>
-        {options.map(({ v, l }) => (
-          <button key={v} onClick={() => onChange(v)} style={{ background: value === v ? C.ink9 : C.bg, color: value === v ? C.bg : C.ink5, border: `1px solid ${value === v ? C.ink9 : C.cr3}`, borderRadius: 999, padding: '4px 10px', fontSize: 11, cursor: 'pointer', fontFamily: SANS, whiteSpace: 'nowrap' }}>
-            {l}
-          </button>
-        ))}
-      </div>
+      <FilterDropdown
+        label={label}
+        value={value}
+        onChange={onChange}
+        options={options.map(({ v, l }) => ({ v, l }))}
+      />
     );
   }
 
@@ -1097,49 +1125,60 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
         </div>
       </div>
 
-      {/* Company tabs — main Tasks view only. Selecting a company filters to its
-          tasks and tags any task you add here so it also appears on that
-          company's page (§ task↔company linkage). */}
-      {!companyFilter && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 16, borderBottom: `1px solid ${C.cr2}` }}>
-          {TASK_COMPANIES.map(c => {
-            const active = tfCo === c;
-            return (
-              <button
-                key={c}
-                onClick={() => setTfCo(c)}
-                style={{
-                  background: 'none', border: 'none',
-                  borderBottom: `2px solid ${active ? C.ink9 : 'transparent'}`,
-                  color: active ? C.ink9 : C.ink5, fontFamily: MONO, fontSize: 11,
-                  letterSpacing: '.06em', textTransform: 'uppercase',
-                  padding: '8px 11px', cursor: 'pointer', fontWeight: active ? 700 : 500,
-                  marginBottom: -1, whiteSpace: 'nowrap',
-                }}
-              >
-                {TAB_LABELS[c] || c}
+      {/* 2026-07 UI pass: saved views — pin a filter combo as a one-click chip. */}
+      {savedViews.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+          <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: C.ink3 }}>Views</span>
+          {savedViews.map(v => (
+            <span key={v.name} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: C.accS, border: `1px solid ${C.acc}30`, borderRadius: 999, padding: '3px 6px 3px 11px' }}>
+              <button onClick={() => applyView(v)} style={{ background: 'none', border: 'none', color: C.acc, fontFamily: SANS, fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: 0 }}>
+                ★ {v.name}
               </button>
-            );
-          })}
+              <button onClick={() => deleteView(v.name)} title="Delete view" style={{ background: 'none', border: 'none', color: C.ink3, fontSize: 11, cursor: 'pointer', padding: '0 3px' }}>×</button>
+            </span>
+          ))}
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
-        <FilterRow label="ASSIGNEE" value={tfAs} onChange={setTfAs} options={[{ v: 'All', l: 'All' }, { v: '__me__', l: 'My tasks' }, ...owners.slice(0, 4).map(o => ({ v: o, l: o }))]} />
-        <FilterRow label="PRIORITY" value={tfPr} onChange={setTfPr} options={['All', 'High', 'Medium', 'Low'].map(p => ({ v: p, l: p }))} />
-        <FilterRow label="DUE" value={tfDue} onChange={setTfDue} options={[{ v: 'All', l: 'All' }, { v: 'overdue', l: 'Overdue' }]} />
+      {/* 2026-07 UI pass: every filter is a compact dropdown in ONE row —
+          company selection included (was a wide tab strip). "Clear ✕" appears
+          whenever any filter is off its default. */}
+      <FilterBar
+        filters={[
+          ...(!companyFilter ? [{ value: tfCo, reset: setTfCo }] : []),
+          { value: tfAs, reset: setTfAs },
+          { value: tfPr, reset: setTfPr },
+          { value: tfDue, reset: setTfDue },
+          { value: tfDeal, reset: setTfDeal },
+          { value: tfWork, reset: setTfWork },
+          { value: tfSection, reset: setTfSection },
+        ]}
+      >
+        {!companyFilter && (
+          <FilterDropdown label="Company" value={tfCo} onChange={setTfCo}
+            options={TASK_COMPANIES.map(c => ({ v: c, l: TAB_LABELS[c] || c }))} />
+        )}
+        <FilterRow label="Assignee" value={tfAs} onChange={setTfAs} options={[{ v: 'All', l: 'All' }, { v: '__me__', l: 'My tasks' }, ...owners.map(o => ({ v: o, l: o }))]} />
+        <FilterRow label="Priority" value={tfPr} onChange={setTfPr} options={['All', 'High', 'Medium', 'Low'].map(p => ({ v: p, l: p }))} />
+        <FilterRow label="Due" value={tfDue} onChange={setTfDue} options={[{ v: 'All', l: 'All' }, { v: 'overdue', l: 'Overdue' }]} />
         {allDealCats.length > 0 && (
-          <FilterRow label="DEAL" value={tfDeal} onChange={setTfDeal} options={[{ v: 'All', l: 'All' }, ...allDealCats.map(d => ({ v: d, l: d })), { v: '__unassigned__', l: 'Unassigned' }]} />
+          <FilterRow label="Deal" value={tfDeal} onChange={setTfDeal} options={[{ v: 'All', l: 'All' }, ...allDealCats.map(d => ({ v: d, l: d })), { v: '__unassigned__', l: 'Unassigned' }]} />
         )}
         {opps.length > 0 && (
-          <FilterRow label="TYPE" value={tfWork} onChange={setTfWork} options={[{ v: 'All', l: 'All' }, { v: 'internal', l: 'Internal' }, { v: 'external', l: 'External' }]} />
+          <FilterRow label="Type" value={tfWork} onChange={setTfWork} options={[{ v: 'All', l: 'All' }, { v: 'internal', l: 'Internal' }, { v: 'external', l: 'External' }]} />
         )}
-        <FilterRow label="SECTION" value={tfSection} onChange={setTfSection}
+        <FilterRow label="Section" value={tfSection} onChange={setTfSection}
           options={[{ v: 'All', l: 'All' }, ...sectionList.map(s => ({ v: s, l: s })), { v: '__none__', l: 'None' }]} />
-      </div>
+        {filtersDirty && (
+          <button onClick={saveCurrentView} title="Save this filter combo as a named view"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 999, border: `1px dashed ${C.cr3}`, background: 'transparent', color: C.ink5, fontFamily: SANS, fontSize: 11, cursor: 'pointer' }}>
+            ☆ Save view
+          </button>
+        )}
+      </FilterBar>
 
       {loading ? (
-        <div style={{ padding: 32, textAlign: 'center', color: C.ink3 }}>Loading tasks…</div>
+        <SkeletonRows rows={7} />
       ) : (
         // One unified Kanban for both the all-companies view and a company page.
         // Every task lives here, sorted High→Low priority inside each status

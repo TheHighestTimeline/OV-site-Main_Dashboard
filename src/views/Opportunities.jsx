@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { C, SERIF, SANS, MONO, stBg, stFg, prBg, prFg, fmtC, fmtD } from '../constants.js';
-import { Eyebrow, Tag, Spinner, Btn, Inp, Sel, FR, useConfirm } from '../components/UI.jsx';
+import { Eyebrow, Tag, Spinner, Btn, Inp, Sel, FR, useConfirm, Modal, FilterDropdown, SkeletonKanban, EmptyState } from '../components/UI.jsx';
+import { cacheGet, cacheSet } from '../lib/cache.js';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask,
-         getAirtableSchema, airtableRecordUrl } from '../api.js';
+         getAirtableSchema, airtableRecordUrl, getAppState, setAppState } from '../api.js';
 import { dealCategoryMatchesSlug, SLUG_TO_DEAL_CATEGORY, COMPANIES, COMPANY_META } from '../constants/roles.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 
@@ -30,6 +31,100 @@ const STAGE_STYLE = {
 };
 
 const OPP_PRIORITIES = ['', 'High Priority', 'Medium Priority', 'Low Priority'];
+
+// ── Per-company pipeline lanes (2026-07 audit §3.2) ──────────────────────────
+// Each company can define its OWN swimlanes (e.g. OVM: "Scope → Build →
+// Review → Launch"; OVMG: the classic sales stages). Config lives in
+// app_state under `pipeline:{slug}`; per-card lane assignments under
+// `pipeline-cards:{slug}`. Every lane maps to a canonical Stage so the all-up
+// Opportunities board still rolls everything into Lead→Closed.
+const LANE_PALETTE = ['#d96b3a', '#2c5d8a', '#2f7d5f', '#b48a1e', '#7c3d8f', '#3a7d44', '#8a5c2c', '#5c2c8a', '#b03a3a', '#4a4f58'];
+
+function defaultLanes() {
+  return OPP_STAGES.map(s => ({
+    id:     s.toLowerCase().replace(/\s+/g, '-'),
+    label:  s,
+    color:  (STAGE_STYLE[s] || {}).hBg || C.ink5,
+    mapsTo: s,
+  }));
+}
+
+// Resolve which lane a card sits in: explicit assignment first (if the lane
+// still exists), then the first lane mapping to the card's canonical stage,
+// then the first lane so nothing is ever silently lost.
+function laneForCard(opp, lanes, assignments) {
+  const assigned = assignments?.[opp.id];
+  if (assigned && lanes.some(l => l.id === assigned)) return assigned;
+  const stage = OPP_STAGES.includes(opp.stage) ? opp.stage : 'Lead';
+  const byStage = lanes.find(l => l.mapsTo === stage);
+  return (byStage || lanes[0])?.id;
+}
+
+// ── Lane editor modal ─────────────────────────────────────────────────────────
+function LaneEditor({ slug, lanes, onSave, onClose }) {
+  const [draft, setDraft] = useState(() => lanes.map(l => ({ ...l })));
+  const [busy, setBusy]   = useState(false);
+
+  const upd  = (i, patch) => setDraft(d => d.map((l, j) => j === i ? { ...l, ...patch } : l));
+  const move = (i, dir) => setDraft(d => {
+    const j = i + dir;
+    if (j < 0 || j >= d.length) return d;
+    const next = [...d];
+    [next[i], next[j]] = [next[j], next[i]];
+    return next;
+  });
+  const remove = i => setDraft(d => d.filter((_, j) => j !== i));
+  const add = () => setDraft(d => [...d, {
+    id: `lane-${Date.now()}`,
+    label: 'New lane',
+    color: LANE_PALETTE[d.length % LANE_PALETTE.length],
+    mapsTo: 'Lead',
+  }]);
+
+  const save = async () => {
+    const clean = draft.filter(l => l.label.trim());
+    if (!clean.length) return;
+    setBusy(true);
+    try { await onSave(clean); onClose(); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title={`${COMPANY_META[slug]?.label || slug} — Kanban lanes`} onClose={onClose}>
+      <p style={{ fontSize: 12, color: C.ink5, margin: '0 0 14px', lineHeight: 1.5 }}>
+        Rename, reorder, recolor, add or remove this company's swimlanes. Each lane maps to a canonical pipeline stage so the all-companies board stays consistent.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {draft.map((l, i) => (
+          <div key={l.id} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', padding: '8px 10px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 8 }}>
+            <button onClick={() => { const next = LANE_PALETTE[(LANE_PALETTE.indexOf(l.color) + 1) % LANE_PALETTE.length]; upd(i, { color: next }); }}
+              title="Click to cycle color"
+              style={{ width: 20, height: 20, borderRadius: 6, background: l.color, border: 'none', cursor: 'pointer', flexShrink: 0 }} />
+            <input value={l.label} onChange={e => upd(i, { label: e.target.value })}
+              style={{ flex: 1, minWidth: 110, background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 6, padding: '5px 9px', fontFamily: SANS, fontSize: 13, color: C.ink9, outline: 'none' }} />
+            <select value={l.mapsTo} onChange={e => upd(i, { mapsTo: e.target.value })}
+              title="Canonical stage this lane rolls up to"
+              style={{ background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 6, padding: '5px 7px', fontFamily: MONO, fontSize: 10, color: C.ink5 }}>
+              {OPP_STAGES.map(s => <option key={s}>{s}</option>)}
+            </select>
+            <div style={{ display: 'flex', gap: 2 }}>
+              <button onClick={() => move(i, -1)} disabled={i === 0} style={{ background: 'none', border: 'none', color: C.ink3, cursor: 'pointer', fontSize: 13, padding: 2 }}>↑</button>
+              <button onClick={() => move(i, +1)} disabled={i === draft.length - 1} style={{ background: 'none', border: 'none', color: C.ink3, cursor: 'pointer', fontSize: 13, padding: 2 }}>↓</button>
+              <button onClick={() => remove(i)} style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', fontSize: 13, padding: 2 }}>×</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 14, gap: 8, flexWrap: 'wrap' }}>
+        <Btn v="gho" onClick={add}>+ Add lane</Btn>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn v="gho" onClick={() => setDraft(defaultLanes())}>Reset to default</Btn>
+          <Btn onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save lanes'}</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 // Matches the Airtable "Entity" single-select options (drives company tabs).
 const ENTITIES = ['OVMG', 'OVM', 'OVTV', 'OVF', 'Amplify', 'Carbon Sponge', 'OVD', 'OVV'];
@@ -149,9 +244,8 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
     name: '',
     stage: 'Lead',
     notes: '',
-    closeDate: '',
-    entity: '',
-    kanbanType: '',   // '' | 'internal' | 'external'
+    // (closeDate/entity/kanbanType defaults are set AFTER the spread below —
+    // they were duplicated here too, which esbuild rightly flagged.)
     ...initial,
     dealValue: initial?.dealValue != null ? String(initial.dealValue) : '',
     closeDate: initial?.closeDate || '',
@@ -159,9 +253,21 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
     entity: initial?.entity || (Array.isArray(initial?.dealCategory) ? initial.dealCategory[0] : initial?.dealCategory) || '',
     // Derive the Internal/External toggle from the saved opportunity if present.
     kanbanType: initial?.kanbanType || '',
+    // §7: linked CRM contact (Airtable 'Associated Contact')
+    contactId: (initial?.contactIds || [])[0] || '',
   });
   const fld = k => e => setF(p => ({ ...p, [k]: e.target.value }));
   const isEdit = !!initial?.id;
+
+  // §7: contacts for the "Linked contact" picker — loaded once per open form.
+  const [contactOpts, setContactOpts] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    import('../api.js').then(({ getContacts }) => getContacts())
+      .then(cs => { if (alive) setContactOpts((cs || []).map(c => ({ id: c.id, name: c.name, company: c.company })).sort((a, b) => (a.name || '').localeCompare(b.name || ''))); })
+      .catch(() => { if (alive) setContactOpts([]); });
+    return () => { alive = false; };
+  }, []);
 
   const inp = { background: C.bg2, border: `1px solid ${C.cr3}`, borderRadius: 8, padding: '7px 11px', fontFamily: SANS, fontSize: 13, color: C.ink9, width: '100%', boxSizing: 'border-box', outline: 'none' };
 
@@ -202,6 +308,14 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
           })}
         </div>
       </FR>
+      <FR label="Linked contact (CRM)">
+        <select value={f.contactId} onChange={fld('contactId')} style={inp} disabled={contactOpts === null}>
+          <option value="">{contactOpts === null ? 'Loading contacts…' : '— None'}</option>
+          {(contactOpts || []).map(c => (
+            <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>
+          ))}
+        </select>
+      </FR>
       <FR label="Notes">
         <textarea value={f.notes} onChange={fld('notes')} rows={3} placeholder="Key context…"
           style={{ ...inp, resize: 'vertical', lineHeight: 1.5 }} />
@@ -222,7 +336,7 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn v="gho" onClick={onClose} disabled={saving}>Cancel</Btn>
-          <Btn onClick={() => { if (!f.name.trim()) { showToast?.('Name required'); return; } onSave({ ...f, dealValue: f.dealValue ? parseFloat(f.dealValue) : null, dealCategory: f.dealCategory ? [f.dealCategory] : [] }); }} disabled={saving || !f.name.trim()}>
+          <Btn onClick={() => { if (!f.name.trim()) { showToast?.('Name required'); return; } const { contactId, ...rest } = f; onSave({ ...rest, contactIds: contactId ? [contactId] : [], dealValue: f.dealValue ? parseFloat(f.dealValue) : null, dealCategory: f.dealCategory ? [f.dealCategory] : [] }); }} disabled={saving || !f.name.trim()}>
             {saving ? 'Saving…' : isEdit ? 'Save' : 'Create'}
           </Btn>
         </div>
@@ -232,36 +346,60 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
 }
 
 // ── Kanban card ───────────────────────────────────────────────────────────────
-function KanbanCard({ opp, onClick, onDragStart }) {
+// 2026-07 UI pass: drag tilt/fade, optional compact density, and a hover-free
+// "advance →" quick action so a card can move to the next lane without
+// dragging or opening the drawer.
+function KanbanCard({ opp, onClick, onDragStart, onAdvance, compact = false }) {
   return (
     <div
       draggable
-      onDragStart={onDragStart}
+      onDragStart={e => { onDragStart(e); requestAnimationFrame(() => { e.target.style.opacity = '.45'; e.target.style.transform = 'rotate(1.5deg) scale(.98)'; }); }}
+      onDragEnd={e => { e.target.style.opacity = ''; e.target.style.transform = ''; }}
       onClick={onClick}
       style={{
         background: C.cr1, border: `1px solid ${C.cr2}`, borderRadius: 8,
-        padding: '10px 12px', cursor: 'pointer', userSelect: 'none',
-        boxShadow: '0 1px 3px rgba(0,0,0,.04)', transition: 'box-shadow .12s',
+        padding: compact ? '6px 9px' : '10px 12px', cursor: 'pointer', userSelect: 'none',
+        boxShadow: '0 1px 3px rgba(0,0,0,.04)', transition: 'box-shadow .12s, transform .12s, opacity .12s',
+        position: 'relative',
       }}
       onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,.1)'; e.currentTarget.style.borderColor = C.acc; }}
       onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,.04)'; e.currentTarget.style.borderColor = C.cr2; }}
     >
-      <div style={{ fontSize: 13, fontWeight: 600, color: C.ink9, lineHeight: 1.3, marginBottom: 5 }}>{opp.name}</div>
-      {opp.dealValue > 0 && (
-        <div style={{ fontFamily: MONO, fontSize: 11, color: C.grn, fontWeight: 600, marginBottom: 5 }}>{fmtC(opp.dealValue)}</div>
-      )}
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        {opp.kanbanType === 'external' && <Tag bg={C.accS} fg={C.acc}>External</Tag>}
-        {opp.kanbanType === 'internal' && <Tag bg={C.bluS} fg={C.blu}>Internal</Tag>}
-        {opp.priority && <Tag bg={C.yelS} fg={C.yel}>{opp.priority.replace(' Priority', '')}</Tag>}
-        {(opp.dealCategory || []).map(dc => (
-          <span key={dc} style={{ fontFamily: MONO, fontSize: 9, color: C.acc, background: C.accS, border: `1px solid ${C.acc}30`, borderRadius: 999, padding: '1px 6px' }}>{dc}</span>
-        ))}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+        <div style={{ flex: 1, fontSize: compact ? 12 : 13, fontWeight: 600, color: C.ink9, lineHeight: 1.3, marginBottom: compact ? 3 : 5 }}>{opp.name}</div>
+        {onAdvance && (
+          <button
+            onClick={e => { e.stopPropagation(); onAdvance(opp); }}
+            title="Advance to next lane"
+            style={{
+              flexShrink: 0, width: 20, height: 20, borderRadius: 5, border: `1px solid ${C.cr3}`,
+              background: C.bg, color: C.ink3, fontSize: 11, cursor: 'pointer', lineHeight: 1,
+              display: 'grid', placeItems: 'center', padding: 0,
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = C.acc; e.currentTarget.style.borderColor = C.acc; }}
+            onMouseLeave={e => { e.currentTarget.style.color = C.ink3; e.currentTarget.style.borderColor = C.cr3; }}
+          >
+            →
+          </button>
+        )}
       </div>
-      {opp.nextAction && (
+      {opp.dealValue > 0 && (
+        <div style={{ fontFamily: MONO, fontSize: 11, color: C.grn, fontWeight: 600, marginBottom: compact ? 3 : 5 }}>{fmtC(opp.dealValue)}</div>
+      )}
+      {!compact && (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {opp.kanbanType === 'external' && <Tag bg={C.accS} fg={C.acc}>External</Tag>}
+          {opp.kanbanType === 'internal' && <Tag bg={C.bluS} fg={C.blu}>Internal</Tag>}
+          {opp.priority && <Tag bg={C.yelS} fg={C.yel}>{opp.priority.replace(' Priority', '')}</Tag>}
+          {(opp.dealCategory || []).map(dc => (
+            <span key={dc} style={{ fontFamily: MONO, fontSize: 9, color: C.acc, background: C.accS, border: `1px solid ${C.acc}30`, borderRadius: 999, padding: '1px 6px' }}>{dc}</span>
+          ))}
+        </div>
+      )}
+      {!compact && opp.nextAction && (
         <div style={{ fontSize: 11, color: C.ink5, marginTop: 5, lineHeight: 1.4 }}>→ {opp.nextAction}</div>
       )}
-      {opp.driveLink && (
+      {!compact && opp.driveLink && (
         <a href={opp.driveLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 5, fontFamily: MONO, fontSize: 9, color: C.blu, textDecoration: 'none' }}>
           ◫ Drive folder ↗
@@ -272,33 +410,66 @@ function KanbanCard({ opp, onClick, onDragStart }) {
 }
 
 // ── Kanban lane ───────────────────────────────────────────────────────────────
-function KanbanLane({ stage, cards, dragOverStage, onCardClick, onDragStart, onDragOver, onDrop, onDragLeave, onAdd }) {
-  const st = STAGE_STYLE[stage] || STAGE_STYLE['Intake'];
-  const isOver = dragOverStage === stage;
+// Generic: takes a lane object ({id, label, color}) so per-company custom
+// lanes (§3.2) and the canonical stage lanes render through one component.
+function KanbanLane({ lane, cards, dragOverLane, onCardClick, onDragStart, onDragOver, onDrop, onDragLeave, onAdd, onAdvance, compact, collapsed, onToggleCollapse }) {
+  const hBg = lane.color || C.ink5;
+  const isOver = dragOverLane === lane.id;
+
+  // 2026-07 UI pass: collapsed lanes shrink to a slim vertical strip (still a
+  // valid drop target) so wide boards stay scannable.
+  if (collapsed) {
+    return (
+      <div
+        onDragOver={onDragOver} onDrop={onDrop} onDragLeave={onDragLeave}
+        onClick={onToggleCollapse}
+        title={`${lane.label} (${cards.length}) — click to expand`}
+        style={{
+          flex: '0 0 40px', minHeight: 220, borderRadius: 8, cursor: 'pointer',
+          background: isOver ? `${hBg}44` : `${hBg}18`, border: `1px solid ${isOver ? hBg : hBg + '40'}`,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: '10px 0',
+          transition: 'background .15s',
+        }}
+      >
+        <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, background: hBg, color: '#fff', padding: '1px 7px', borderRadius: 99 }}>{cards.length}</span>
+        <span style={{ writingMode: 'vertical-rl', fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', color: hBg }}>
+          {lane.label}
+        </span>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ flex: '0 0 220px', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '9px 12px', borderRadius: '8px 8px 0 0', background: st.hBg, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: st.hFg }}>{stage}</span>
+    <div style={{ flex: `0 0 ${compact ? 190 : 220}px`, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '9px 12px', borderRadius: '8px 8px 0 0', background: hBg, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <button onClick={onToggleCollapse} title="Collapse lane" style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+          <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#fff' }}>{lane.label}</span>
+        </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontFamily: MONO, fontSize: 10, background: 'rgba(255,255,255,.18)', color: st.hFg, padding: '1px 7px', borderRadius: 99 }}>{cards.length}</span>
-          <button onClick={() => onAdd(stage)} title="Add opportunity" style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: st.hFg, borderRadius: 4, width: 20, height: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, lineHeight: 1, padding: 0 }}>+</button>
+          <span style={{ fontFamily: MONO, fontSize: 10, background: 'rgba(255,255,255,.18)', color: '#fff', padding: '1px 7px', borderRadius: 99 }}>{cards.length}</span>
+          <button onClick={() => onAdd(lane)} title="Add opportunity" style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: '#fff', borderRadius: 4, width: 20, height: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, lineHeight: 1, padding: 0 }}>+</button>
+          <button onClick={onToggleCollapse} title="Collapse lane" style={{ background: 'rgba(255,255,255,.2)', border: 'none', color: '#fff', borderRadius: 4, width: 20, height: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, lineHeight: 1, padding: 0 }}>«</button>
         </div>
       </div>
       <div
         onDragOver={onDragOver} onDrop={onDrop} onDragLeave={onDragLeave}
         style={{
           flex: 1, overflowY: 'auto', padding: '7px 6px',
-          background: isOver ? `${st.hBg}22` : C.bg2,
-          border: `1px solid ${isOver ? st.border : C.cr2}`, borderTop: 'none',
+          background: isOver ? `${hBg}22` : C.bg2,
+          border: `1px solid ${isOver ? hBg : C.cr2}`, borderTop: 'none',
           borderRadius: '0 0 8px 8px', display: 'flex', flexDirection: 'column', gap: 6,
           minHeight: 100, transition: 'background .15s, border-color .15s',
         }}
       >
-        {cards.length === 0 ? (
-          <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: 11, color: C.ink3, fontFamily: MONO, opacity: isOver ? .3 : .6 }}>Drop here</div>
+        {cards.length === 0 && !isOver ? (
+          <div style={{ padding: '16px 8px', textAlign: 'center', fontSize: 11, color: C.ink3, fontFamily: MONO, opacity: .6 }}>Drop here</div>
         ) : cards.map(o => (
-          <KanbanCard key={o.id} opp={o} onClick={() => onCardClick(o)} onDragStart={e => onDragStart(e, o)} />
+          <KanbanCard key={o.id} opp={o} compact={compact} onClick={() => onCardClick(o)} onDragStart={e => onDragStart(e, o)} onAdvance={onAdvance} />
         ))}
+        {/* Drop placeholder — shows exactly where the card will land */}
+        {isOver && (
+          <div style={{ border: `2px dashed ${hBg}`, borderRadius: 8, minHeight: 44, background: `${hBg}10`, transition: 'all .1s' }} />
+        )}
       </div>
     </div>
   );
@@ -318,9 +489,80 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
   const [typeFilter, setTypeFilter] = useState('All'); // 'All' | 'internal' | 'external'
   // Company filter for the main (non-company-scoped) kanban/list
   const [companySelect, setCompanySelect] = useState('All');
-  const [dragOverStage, setDragOver]  = useState(null);
+  const [dragOverLane, setDragOver]  = useState(null);
   const dragCard = useRef(null);
   const [confirmNode, confirm] = useConfirm();
+
+  // ── Per-company lanes (§3.2) ────────────────────────────────────────────────
+  // The active pipeline slug: the company tab's prop, or the global scope /
+  // pill selection on the main board. 'All' → canonical stage lanes.
+  const pipelineSlug = companyFilter || (companySelect !== 'All' ? companySelect : null);
+  const [customLanes,  setCustomLanes]  = useState(null); // null = not loaded / default
+  const [assignments,  setAssignments]  = useState({});   // oppId → laneId
+  const [laneEditorOpen, setLaneEditorOpen] = useState(false);
+
+  useEffect(() => {
+    setCustomLanes(null);
+    setAssignments({});
+    if (!pipelineSlug) return;
+    let alive = true;
+    Promise.all([
+      getAppState(`pipeline:${pipelineSlug}`).catch(() => ({ data: null })),
+      getAppState(`pipeline-cards:${pipelineSlug}`).catch(() => ({ data: null })),
+    ]).then(([cfg, cards]) => {
+      if (!alive) return;
+      if (cfg?.data?.lanes?.length) setCustomLanes(cfg.data.lanes);
+      if (cards?.data) setAssignments(cards.data);
+    });
+    return () => { alive = false; };
+  }, [pipelineSlug]);
+
+  const lanes = useMemo(
+    () => (pipelineSlug && customLanes?.length) ? customLanes : defaultLanes(),
+    [pipelineSlug, customLanes],
+  );
+
+  const saveLanes = async (newLanes) => {
+    setCustomLanes(newLanes);
+    try { await setAppState(`pipeline:${pipelineSlug}`, { lanes: newLanes }); showToast?.('Lanes saved ✓'); }
+    catch (e) { showToast?.('Lane save failed: ' + e.message); }
+  };
+
+  const saveAssignment = async (oppId, laneId) => {
+    const next = { ...assignments, [oppId]: laneId };
+    setAssignments(next);
+    if (!pipelineSlug) return;
+    try { await setAppState(`pipeline-cards:${pipelineSlug}`, next); }
+    catch { /* non-fatal — stage still updated in Airtable */ }
+  };
+
+  // ── 2026-07 UI pass: collapsible lanes + compact density ───────────────────
+  const COLLAPSE_KEY = `ovmg.kanban.collapsed.${pipelineSlug || 'all'}`;
+  const [collapsedLanes, setCollapsedLanes] = useState(() => new Set());
+  useEffect(() => {
+    try { setCollapsedLanes(new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]'))); }
+    catch { setCollapsedLanes(new Set()); }
+  }, [COLLAPSE_KEY]);
+  const toggleCollapse = (laneId) => setCollapsedLanes(prev => {
+    const next = new Set(prev);
+    if (next.has(laneId)) next.delete(laneId); else next.add(laneId);
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...next])); } catch { /* ignore */ }
+    return next;
+  });
+  const [compact, setCompact] = useState(() => { try { return localStorage.getItem('ovmg.kanban.compact') === '1'; } catch { return false; } });
+  const flipCompact = () => setCompact(c => { try { localStorage.setItem('ovmg.kanban.compact', c ? '' : '1'); } catch { /* ignore */ } return !c; });
+
+  // Horizontal scroll-edge shadows so off-screen lanes are obvious.
+  const [scrollEdges, setScrollEdges] = useState({ l: false, r: false });
+  const boardScrollRef = useCallback(node => {
+    if (!node) return;
+    const update = () => setScrollEdges({
+      l: node.scrollLeft > 4,
+      r: node.scrollLeft + node.clientWidth < node.scrollWidth - 4,
+    });
+    update();
+    node.addEventListener('scroll', update, { passive: true });
+  }, []);
 
   // Canonical categories for the active company (pre-fill the form)
   const companyCats = companyFilter ? (SLUG_TO_DEAL_CATEGORY[companyFilter] || []) : [];
@@ -336,10 +578,18 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
     }).catch(() => {});
   }, []);
 
+  // 2026-07 UI pass: stale-while-revalidate — render the cached board
+  // instantly, refresh in the background. Spinner only on true first load.
   const load = useCallback(() => {
-    setLoading(true);
+    const cached = cacheGet('opportunities');
+    if (cached) { setOpps(cached); setLoading(false); }
+    else setLoading(true);
     getOpportunities()
-      .then(data => setOpps(Array.isArray(data) ? data : []))
+      .then(data => {
+        const list = Array.isArray(data) ? data : [];
+        cacheSet('opportunities', list);
+        setOpps(list);
+      })
       .catch(e => showToast?.('Could not load opportunities: ' + e.message))
       .finally(() => setLoading(false));
   }, [showToast]);
@@ -360,15 +610,26 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
   // Reusable Internal/External + Kanban/List control row. Called as a function
   // ({renderControlRow()}) rather than rendered as <ControlRow/> so it doesn't
   // remount its DOM on every parent re-render (e.g. each kanban drag-over).
+  // 2026-07 UI pass: filters are compact dropdowns (shared FilterDropdown).
   const renderControlRow = () => (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-      {[['All', 'All'], ['internal', 'Internal'], ['external', 'External']].map(([v, l]) => (
-        <button key={v} onClick={() => setTypeFilter(v)} style={{
-          background: typeFilter === v ? C.ink9 : C.bg, color: typeFilter === v ? C.bg : C.ink5,
-          border: `1px solid ${typeFilter === v ? C.ink9 : C.cr3}`, borderRadius: 999,
-          padding: '4px 11px', fontSize: 11, fontFamily: SANS, cursor: 'pointer', whiteSpace: 'nowrap',
-        }}>{l}</button>
-      ))}
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      {!companyFilter && (
+        <FilterDropdown
+          label="Company"
+          value={companySelect}
+          onChange={setCompanySelect}
+          options={[
+            { v: 'All', l: 'All Companies' },
+            ...COMPANIES.map(s => ({ v: s, l: COMPANY_META[s]?.label || s, color: COMPANY_META[s]?.color_hex })),
+          ]}
+        />
+      )}
+      <FilterDropdown
+        label="Type"
+        value={typeFilter}
+        onChange={setTypeFilter}
+        options={[{ v: 'All', l: 'All' }, { v: 'internal', l: 'Internal' }, { v: 'external', l: 'External' }]}
+      />
       {allowViewToggle && !isMobile && (
         <div style={{ display: 'flex', gap: 0, marginLeft: 4, border: `1px solid ${C.cr3}`, borderRadius: 8, overflow: 'hidden' }}>
           {[['kanban', 'Kanban'], ['list', 'List']].map(([v, l]) => (
@@ -383,17 +644,15 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
     </div>
   );
 
-  const byStage = useMemo(() => {
-    const m = Object.fromEntries(OPP_STAGES.map(s => [s, []]));
+  // Cards grouped by LANE (custom per-company lanes or the canonical stages).
+  const byLane = useMemo(() => {
+    const m = Object.fromEntries(lanes.map(l => [l.id, []]));
     scoped.forEach(o => {
-      // If the stage from Airtable exactly matches a known column, use it.
-      // Otherwise fall back: non-empty unknown stage → 'Other/Holds',
-      // null/undefined → 'Intake' so nothing is silently lost.
-      const s = OPP_STAGES.includes(o.stage) ? o.stage : 'Lead';
-      m[s].push(o);
+      const laneId = laneForCard(o, lanes, assignments);
+      (m[laneId] || m[lanes[0]?.id] || []).push(o);
     });
     return m;
-  }, [scoped]);
+  }, [scoped, lanes, assignments]);
 
   const stages = useMemo(() => {
     const base = companyFilter ? opps.filter(o => dealCategoryMatchesSlug(o.dealCategory, companyFilter)) : opps;
@@ -454,24 +713,64 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
     });
   };
 
-  // ── Drag-and-drop (kanban mode) ────────────────────────────────────────────
+  // ── Drag-and-drop / quick advance (kanban mode) ────────────────────────────
+  // Moving a card records the lane assignment (per-company boards) AND updates
+  // the canonical Stage the lane maps to. Every move gets an Undo toast
+  // (2026-07 UI pass).
+  const applyMove = async (opp, targetLane) => {
+    const prevLane  = laneForCard(opp, lanes, assignments);
+    const prevStage = opp.stage;
+    if (prevLane === targetLane.id) return;
+
+    if (pipelineSlug) saveAssignment(opp.id, targetLane.id);
+
+    const targetStage  = targetLane.mapsTo || targetLane.label;
+    const changedStage = opp.stage !== targetStage && OPP_STAGES.includes(targetStage);
+    if (changedStage) {
+      setOpps(prev => prev.map(o => o.id === opp.id ? { ...o, stage: targetStage } : o));
+      try {
+        await updateOpportunity(opp.id, { stage: targetStage });
+      } catch (e) {
+        showToast?.('Stage update failed: ' + e.message);
+        load();
+        return;
+      }
+    }
+
+    showToast?.({
+      text: `${opp.name} → ${targetLane.label}`,
+      actionLabel: 'Undo',
+      onAction: () => {
+        if (pipelineSlug) saveAssignment(opp.id, prevLane);
+        if (changedStage) {
+          setOpps(prev => prev.map(o => o.id === opp.id ? { ...o, stage: prevStage } : o));
+          updateOpportunity(opp.id, { stage: prevStage }).catch(() => load());
+        }
+      },
+    });
+  };
+
   const handleDragStart = (e, opp) => { dragCard.current = opp; e.dataTransfer.effectAllowed = 'move'; };
-  const handleDrop      = async (e, targetStage) => {
+  const handleDrop      = (e, targetLane) => {
     e.preventDefault(); setDragOver(null);
     const opp = dragCard.current;
-    if (!opp || opp.stage === targetStage) return;
     dragCard.current = null;
-    setOpps(prev => prev.map(o => o.id === opp.id ? { ...o, stage: targetStage } : o));
-    try {
-      await updateOpportunity(opp.id, { stage: targetStage });
-    } catch (e) {
-      showToast?.('Stage update failed: ' + e.message);
-      load();
-    }
+    if (opp) applyMove(opp, targetLane);
+  };
+
+  // "→" quick action on cards: hop to the next lane without dragging.
+  const advanceCard = (opp) => {
+    const cur  = laneForCard(opp, lanes, assignments);
+    const idx  = lanes.findIndex(l => l.id === cur);
+    const next = lanes[idx + 1];
+    if (next) applyMove(opp, next);
+    else showToast?.('Already in the last lane');
   };
 
   if (loading) {
-    return <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner size={30} color={C.acc} /></div>;
+    return view === 'kanban'
+      ? <div style={{ paddingTop: 8 }}><SkeletonKanban lanes={isMobile ? 1 : 5} /></div>
+      : <div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spinner size={30} color={C.acc} /></div>;
   }
 
   // ══ KANBAN VIEW ══════════════════════════════════════════════════════════════
@@ -497,56 +796,83 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             {renderControlRow()}
+            {pipelineSlug && !isMobile && (
+              <Btn v="gho" onClick={() => setLaneEditorOpen(true)} sx={{ fontSize: 11 }}>⚙ Lanes</Btn>
+            )}
+            {!isMobile && (
+              <Btn v="gho" onClick={flipCompact} sx={{ fontSize: 11 }} title="Toggle card density">
+                {compact ? '☰ Cozy' : '≡ Compact'}
+              </Btn>
+            )}
             <Btn onClick={() => openForm()}>+ New</Btn>
           </div>
         </div>
 
-        {/* Company filter pills — only on the main /kanban tab (no companyFilter prop) */}
-        {!companyFilter && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12, flexShrink: 0 }}>
-            {[{ slug: 'All', label: 'All Companies', color: C.ink9 },
-              ...COMPANIES.map(s => ({ slug: s, label: COMPANY_META[s]?.label || s, color: COMPANY_META[s]?.color_hex || C.ink5 }))
-            ].map(({ slug, label, color }) => {
-              const on = companySelect === slug;
+        {laneEditorOpen && pipelineSlug && (
+          <LaneEditor slug={pipelineSlug} lanes={lanes} onSave={saveLanes} onClose={() => setLaneEditorOpen(false)} />
+        )}
+
+        {/* (Company pills row removed — company selection lives in the
+            Company dropdown inside the control row, 2026-07 UI pass.) */}
+
+        {isMobile ? (
+          /* §3.3: mobile keeps lane grouping — sticky lane headers over a
+             scrolling card list, instead of the old flat ungrouped list. */
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {scoped.length === 0 ? (
+              <EmptyState icon="◆" title="No opportunities yet"
+                body="Track a deal, build, or partnership here and it rolls up to the all-companies board automatically."
+                actionLabel="+ New opportunity" onAction={() => openForm()} />
+            ) : lanes.map(lane => {
+              const cards = byLane[lane.id] || [];
+              if (!cards.length) return null;
               return (
-                <button key={slug} onClick={() => setCompanySelect(slug)} style={{
-                  padding: '4px 11px', borderRadius: 99, fontSize: 11, fontFamily: SANS, cursor: 'pointer',
-                  border: `1px solid ${on ? color : C.cr3}`,
-                  background: on ? color + '18' : C.bg,
-                  color: on ? color : C.ink5,
-                  fontWeight: on ? 600 : 400,
-                }}>{label}</button>
+                <div key={lane.id}>
+                  <div style={{
+                    position: 'sticky', top: 0, zIndex: 5,
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '7px 12px', borderRadius: 8, background: lane.color || C.ink5,
+                    margin: '6px 0',
+                  }}>
+                    <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#fff' }}>{lane.label}</span>
+                    <span style={{ fontFamily: MONO, fontSize: 10, background: 'rgba(255,255,255,.2)', color: '#fff', padding: '1px 7px', borderRadius: 99 }}>{cards.length}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {cards.map(o => (
+                      <KanbanCard key={o.id} opp={o} onClick={() => openForm(o)} onDragStart={() => {}} onAdvance={advanceCard} />
+                    ))}
+                  </div>
+                </div>
               );
             })}
           </div>
-        )}
-
-        {isMobile ? (
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {scoped.length === 0 ? (
-              <div style={{ padding: 40, textAlign: 'center', color: C.ink3, fontSize: 13, background: C.bg2, border: `1px dashed ${C.cr3}`, borderRadius: 12 }}>No opportunities yet.</div>
-            ) : scoped.map(o => (
-              <KanbanCard key={o.id} opp={o} onClick={() => openForm(o)} onDragStart={() => {}} />
-            ))}
-          </div>
         ) : (
-          <div style={{ overflowX: 'auto', flex: 1, paddingBottom: 16 }}>
-            <div style={{ display: 'flex', gap: 10, minWidth: 'max-content', alignItems: 'flex-start' }}>
-              {OPP_STAGES.map(stage => (
-                <KanbanLane
-                  key={stage}
-                  stage={stage}
-                  cards={byStage[stage] || []}
-                  dragOverStage={dragOverStage}
-                  onCardClick={opp => openForm(opp)}
-                  onDragStart={handleDragStart}
-                  onDragOver={e => { e.preventDefault(); setDragOver(stage); }}
-                  onDrop={e => handleDrop(e, stage)}
-                  onDragLeave={() => setDragOver(null)}
-                  onAdd={stage => openForm({ dealCategory: companyCats[0] || '', stage })}
-                />
-              ))}
+          <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
+            <div ref={boardScrollRef} style={{ overflowX: 'auto', height: '100%', paddingBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 10, minWidth: 'max-content', alignItems: 'stretch', height: '100%' }}>
+                {lanes.map(lane => (
+                  <KanbanLane
+                    key={lane.id}
+                    lane={lane}
+                    cards={byLane[lane.id] || []}
+                    dragOverLane={dragOverLane}
+                    compact={compact}
+                    collapsed={collapsedLanes.has(lane.id)}
+                    onToggleCollapse={() => toggleCollapse(lane.id)}
+                    onAdvance={advanceCard}
+                    onCardClick={opp => openForm(opp)}
+                    onDragStart={handleDragStart}
+                    onDragOver={e => { e.preventDefault(); setDragOver(lane.id); }}
+                    onDrop={e => handleDrop(e, lane)}
+                    onDragLeave={() => setDragOver(null)}
+                    onAdd={l => openForm({ dealCategory: companyCats[0] || '', stage: l.mapsTo || 'Lead' })}
+                  />
+                ))}
+              </div>
             </div>
+            {/* Scroll-edge shadows — make off-screen lanes obvious */}
+            {scrollEdges.l && <div style={{ position: 'absolute', left: 0, top: 0, bottom: 16, width: 28, background: `linear-gradient(90deg, ${C.bg}, transparent)`, pointerEvents: 'none' }} />}
+            {scrollEdges.r && <div style={{ position: 'absolute', right: 0, top: 0, bottom: 16, width: 28, background: `linear-gradient(270deg, ${C.bg}, transparent)`, pointerEvents: 'none' }} />}
           </div>
         )}
       </div>
@@ -577,15 +903,13 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
 
       {/* Stage filter */}
       {stages.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-          {['All', ...stages].map(s => (
-            <button key={s} onClick={() => setStageFilter(s)} style={{
-              background: stageFilter === s ? C.ink9 : C.bg, color: stageFilter === s ? C.bg : C.ink5,
-              border: `1px solid ${stageFilter === s ? C.ink9 : C.cr3}`, borderRadius: 999,
-              padding: '4px 11px', fontSize: 11, fontFamily: SANS, cursor: 'pointer', whiteSpace: 'nowrap',
-            }}>{s}</button>
-          ))}
-        </div>
+        <FilterDropdown
+          label="Stage"
+          value={stageFilter}
+          onChange={setStageFilter}
+          options={['All', ...stages]}
+          sx={{ marginBottom: 16 }}
+        />
       )}
 
       {scoped.length === 0 ? (

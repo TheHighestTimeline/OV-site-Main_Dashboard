@@ -1,7 +1,7 @@
 // bookmarks-remove — remove a reference from a bookmark folder.
 // Body: { folderId: string, referenceId: string }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

@@ -6,7 +6,7 @@
 // Each resource that is `ovmg_only = true` is filtered server-side based on
 // the calling user's email domain.
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

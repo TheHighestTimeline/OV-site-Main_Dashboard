@@ -1,6 +1,6 @@
 // posts-create — forwards to Supabase (same as posts-upsert).
 // Social.jsx calls this endpoint directly for new posts.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

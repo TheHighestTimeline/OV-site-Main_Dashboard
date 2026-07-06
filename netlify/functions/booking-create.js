@@ -6,7 +6,7 @@
 // returns: { booking: {...}, meetLink }
 
 import { google } from 'googleapis';
-import { CORS } from './_notion.js';
+import { CORS } from './_http.js';
 import { getSupabase } from './_supabase.js';
 import { getActiveGoogleClient } from './_google.js';
 import crypto from 'crypto';

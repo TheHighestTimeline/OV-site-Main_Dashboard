@@ -2,7 +2,7 @@
 // Disconnects a Google account from a user. Revokes the refresh token on
 // Google's side too, so the dashboard immediately loses access.
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

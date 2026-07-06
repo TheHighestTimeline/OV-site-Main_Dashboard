@@ -7,7 +7,7 @@
 //        until their JWT refreshes — up to 5 min window)
 
 import { createClerkClient } from '@clerk/backend';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin, getUser } from './_auth.js';
 import { logAudit } from './_audit.js';
 

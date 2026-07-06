@@ -20,7 +20,7 @@
 //   { action: 'mergeBranch',   repo: 'owner/name', head: 'feature-x', base: 'main' }
 //   { action: 'compareCommits', repo: 'owner/name', base: 'main', head: 'feature-x' }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 const GH_API = 'https://api.github.com';

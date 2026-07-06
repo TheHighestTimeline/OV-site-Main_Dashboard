@@ -2,7 +2,7 @@
 // Sets which connected Google account is the user's "active" one.
 // Subsequent calls to Gmail / Calendar / Drive use the active account.
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

@@ -1,5 +1,5 @@
 // posts-upsert — Phase 12. Create or update a post (draft).
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

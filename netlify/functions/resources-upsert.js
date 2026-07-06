@@ -17,7 +17,7 @@
 //     tags?:               string[]
 //   }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

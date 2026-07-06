@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { C, SERIF, SANS, MONO, fmtR } from '../constants.js';
 import { Tag, Eyebrow, Btn, Spinner, Modal } from '../components/UI.jsx';
-import { transcribeAudio, parseVoice, createTask, updateTask, createContact, updateContact, createAudioLog, listAudioLogs, updateAudioLog } from '../api.js';
+import { transcribeAudio, parseVoice, createTask, updateTask, createContact, updateContact, createAudioLog, listAudioLogs, updateAudioLog, createReview } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 
 // ── Waveform (same pattern as MyDay) ─────────────────────────────────────────
@@ -433,6 +433,21 @@ function RecordView({ user, showToast }) {
 
           // Save to audio_logs
           await createAudioLog({ kind: 'senior_partner', transcript, status: 'pending_review', audio_url: null });
+          // §4: also stage in the unified Review queue (AI parse runs there
+          // on approval context). Non-fatal — the audio log above is the
+          // safety copy either way.
+          if (transcript) {
+            try {
+              const parsed = await parseVoice(transcript, { section: 'audio-dump' });
+              await createReview({
+                source: 'audio-dump',
+                title: `Audio dump — ${new Date().toLocaleDateString()}`,
+                transcript,
+                summary: parsed?.summary || '',
+                proposedActions: parsed || {},
+              });
+            } catch { /* review staging is best-effort */ }
+          }
           setDuration(dur);
           setDoneTs(new Date());
           setPhase('done');

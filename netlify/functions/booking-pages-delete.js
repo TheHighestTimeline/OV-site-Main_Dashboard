@@ -1,5 +1,5 @@
 // booking-pages-delete — delete a booking page (owner only).
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

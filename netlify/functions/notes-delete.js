@@ -1,7 +1,7 @@
 // notes-delete — deletes a note. Notes live in the shared Activities table
 // as of 2026-07 (see notes-create.js).
 import { airtableDelete } from './_airtable.js';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 const TABLE = () => process.env.AIRTABLE_TABLE_ACTIVITIES || 'Activities';

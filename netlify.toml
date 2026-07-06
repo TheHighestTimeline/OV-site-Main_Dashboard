@@ -29,6 +29,20 @@
   node_bundler = "esbuild"
   included_files = []
 
+# ── Scheduled functions (2026-07 audit §4 + §7) ──────────────────────────────
+# granola-poll: pulls new Granola calls every 15 min → AI parse → review queue.
+[functions."granola-poll"]
+  schedule = "*/15 * * * *"
+
+# reminders-daily: 7am ET (11:00 UTC) task-due / overdue-next-action digest.
+[functions."reminders-daily"]
+  schedule = "0 11 * * *"
+
+# weekly-report: Friday 8am ET (12:00 UTC) slippage report (stale deals,
+# stuck tasks, overdue contacts).
+[functions."weekly-report"]
+  schedule = "0 12 * * 5"
+
 # ── Security headers — Phase 7 audit fix M-10 ───────────────────────────────
 # Content-Security-Policy + standard hardening headers applied to every
 # response. The CSP allows the dashboard to:

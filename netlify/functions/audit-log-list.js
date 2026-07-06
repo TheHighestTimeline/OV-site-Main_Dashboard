@@ -2,7 +2,7 @@
 // Lists recent rows from audit_log for the Admin tab.
 //
 // GET /.netlify/functions/audit-log-list?limit=50&action=role.change
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

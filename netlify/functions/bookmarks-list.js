@@ -2,7 +2,7 @@
 // Schema: bookmark_folders (id, user_id, name, sort_order, created_at)
 //         bookmark_items   (id, folder_id, resource_id, sort_order, created_at)
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

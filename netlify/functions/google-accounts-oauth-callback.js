@@ -11,7 +11,7 @@
 // without our session JWT. CSRF protection comes from the `state` token we
 // minted in google-accounts-oauth-start and stored in oauth_state.
 
-import { CORS } from './_notion.js';
+import { CORS } from './_http.js';
 import { getSupabase } from './_supabase.js';
 import { makeOAuthClient } from './_google.js';
 import { google } from 'googleapis';

@@ -1,5 +1,5 @@
 // booking-pages-list — list the authenticated user's booking pages.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

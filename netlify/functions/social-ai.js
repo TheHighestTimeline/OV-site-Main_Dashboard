@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { logUsage, tokensFromAnthropic } from './_usage.js';
 

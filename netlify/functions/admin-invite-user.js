@@ -1,6 +1,6 @@
 // Invites a user via Clerk. Admin only.
 import { createClerkClient } from '@clerk/backend';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin } from './_auth.js';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });

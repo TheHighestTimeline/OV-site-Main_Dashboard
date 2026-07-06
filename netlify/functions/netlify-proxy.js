@@ -13,7 +13,7 @@
 //   { action: 'listSiteDeploys',  siteId: 'ovmgdashboard', limit: 5 }
 //   { action: 'getSiteInfo',      siteId: 'ovmgdashboard' }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 const NL_API = 'https://api.netlify.com/api/v1';

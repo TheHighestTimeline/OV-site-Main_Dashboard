@@ -1,7 +1,7 @@
 // resource-comments-update — edit a comment. Users can only edit their own (admins can edit any).
 // Body: { id: string, body: string }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

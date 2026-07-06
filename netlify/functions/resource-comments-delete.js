@@ -1,7 +1,7 @@
 // resource-comments-delete — delete a comment. Users can only delete their own (admins can delete any).
 // Body: { id: string }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

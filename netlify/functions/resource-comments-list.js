@@ -3,7 +3,7 @@
 // Returns: { comments: [...] }
 // Schema: resource_comments (id, resource_id, user_id, author_name, body, created_at, updated_at)
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

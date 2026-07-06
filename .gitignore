@@ -6,3 +6,18 @@ __pycache__/
 .env.local
 dist/
 .DS_Store
+
+# ── Business documents do NOT belong in the repo (2026-07 audit §1.4) ─────────
+# The OVMG Shared Drive is the source of truth for documents. Files that were
+# in the repo root have been moved to _MOVE_TO_DRIVE/ — upload that folder to
+# the Shared Drive, then delete it locally.
+_MOVE_TO_DRIVE/
+*.docx
+*.xlsx
+*.csv
+*.pdf
+*.zip
+.~lock*
+
+# One-off local helper scripts
+*.bat

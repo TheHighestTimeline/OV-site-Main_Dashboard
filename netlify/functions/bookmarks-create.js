@@ -1,7 +1,7 @@
 // bookmarks-create — create a new bookmark folder for the calling user.
 // Body: { name: string }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

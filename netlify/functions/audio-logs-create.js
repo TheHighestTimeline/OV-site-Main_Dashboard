@@ -1,7 +1,7 @@
 // audio-logs-create — POST: create a new audio_log record.
 // Body: { kind, transcript, status, audio_url }
 // Auth required.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

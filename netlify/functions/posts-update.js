@@ -1,6 +1,6 @@
 // posts-update — forwards to Supabase (same as posts-upsert with an id).
 // Social.jsx calls this endpoint directly to update post status etc.
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

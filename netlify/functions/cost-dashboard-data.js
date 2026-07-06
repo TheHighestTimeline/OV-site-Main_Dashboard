@@ -7,7 +7,7 @@
 // GET /.netlify/functions/cost-dashboard-data?period=session|today|week|month|last_month|all
 //   returns: { total, byService:[...], byModel:[...], byDay:[...], topSurfaces:[...] }
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

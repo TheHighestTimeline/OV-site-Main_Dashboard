@@ -1,3 +1,9 @@
+// ── Bootstrap admins ──────────────────────────────────────────────────────────
+// UI-side mirror of the server's ADMIN_EMAILS env var (server is authoritative;
+// this only controls what the client renders). Keeps the owner from being
+// locked out of the Admin panel before Clerk roles are assigned.
+export const BOOTSTRAP_ADMINS = ['tanner@onevibemediagroup.com'];
+
 // ── Role definitions ──────────────────────────────────────────────────────────
 export const ROLES = {
   admin:          { label: 'Admin',          desc: 'Full access + user management' },
@@ -27,48 +33,49 @@ export const COMPANY_META = {
   ovmg: {
     label:    'OVMG',
     color_hex: '#d96b3a',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovm: {
     label:    'OVM',
     color_hex: '#2c5d8a',
     // Tools = HTML editor + Email composer + Clients, combined (see CompanyView).
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovtv: {
     label:    'OVTV',
     color_hex: '#2f7d5f',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovf: {
     label:    'OVF',
     color_hex: '#b48a1e',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   amplify: {
     label:    'Amplify Artists',
     color_hex: '#7c3d8f',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   carbonsponge: {
     label:    'Carbon Sponge',
     color_hex: '#3a7d44',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovd: {
     label:    'OVD',
     color_hex: '#8a5c2c',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
   ovv: {
     label:    'OVV',
     color_hex: '#5c2c8a',
-    sub_tabs: ['tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
+    sub_tabs: ['hq', 'tasks', 'contacts', 'activities', 'documents', 'kanban', 'drive', 'tools', 'references'],
   },
 };
 
 // ── Sub-tab labels (used inside company sections) ─────────────────────────────
 export const COMPANY_SUBTAB_LABELS = {
+  hq:           'HQ',
   contacts:     'Contacts',
   activities:   'Activities',
   documents:    'Documents',
@@ -152,6 +159,7 @@ export const TAB_ACCESS = {
   contacts:     ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   tasks:        ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   kanban:       ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
+  review:       ['admin', 'executive', 'operations', 'senior_partner'],
   outreach:     ['admin', 'executive', 'operations', 'sales', 'member', 'senior_partner', 'read_only'],
   social:       ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   websites:     ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
@@ -188,7 +196,7 @@ for (const tab of Object.keys(TAB_ACCESS)) {
 }
 
 export const ALL_TABS = [
-  'overview', 'my-day', 'audio-dump',
+  'overview', 'my-day', 'audio-dump', 'review',
   'contacts', 'tasks', 'outreach', 'social',
   'websites', 'tools', 'booking', 'references',
   'ncnda', 'signature', 'email', 'financial',
@@ -203,6 +211,7 @@ export const TAB_LABELS = {
   overview:          'Overview',
   'my-day':          'My Day',
   'audio-dump':      'Audio Dump',
+  review:            'Review',
   contacts:          'Contacts',
   tasks:             'Tasks',
   outreach:          'Outreach',

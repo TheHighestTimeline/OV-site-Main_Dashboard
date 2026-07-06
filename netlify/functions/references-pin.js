@@ -2,7 +2,7 @@
 // Stores pins in the `resource_pins` table: (user_id, resource_id).
 // Any authenticated user can pin their own items.
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 

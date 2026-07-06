@@ -1,6 +1,6 @@
 // Auth helper — validates Clerk JWT from Authorization: Bearer header.
 import { createClerkClient, verifyToken } from '@clerk/backend';
-import { CORS } from './_notion.js';
+import { CORS } from './_http.js';
 
 const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
@@ -56,43 +56,27 @@ export async function getUser(event) {
 const unauth = { statusCode: 401, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Unauthorized' }) };
 const denied = { statusCode: 403, headers: { ...CORS, 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Access denied' }) };
 
-export async function requireAuth(event) {
-  const payload = await verifyClerkToken(event);
-  if (payload) return null;
-  return unauth;
+// ── SECURITY FIX (2026-07 audit §1.1) ────────────────────────────────────────
+// Previously ANY @onevibemediagroup.com email was treated as a full admin by
+// every server-side gate, which made the whole role system decorative for
+// employees. Admin is now granted ONLY by the 'admin' role in Clerk
+// publicMetadata, plus a small bootstrap allowlist (ADMIN_EMAILS env var,
+// comma-separated) so the owner can never lock himself out before roles are
+// assigned. The company domain is used for signup allowlisting (see Clerk
+// dashboard → Restrictions), NOT for privilege escalation.
+const BOOTSTRAP_ADMINS = (process.env.ADMIN_EMAILS || 'tanner@onevibemediagroup.com')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+export function isAdminUser(user) {
+  if (!user) return false;
+  const email = (user.email || '').toLowerCase();
+  return user.roles.includes('admin') || user.role === 'admin' || BOOTSTRAP_ADMINS.includes(email);
 }
 
-// requireFullAccess: has at least one non-sales role OR is OVMG email
-export async function requireFullAccess(event) {
-  const user = await getUser(event);
-  if (!user) return unauth;
-  const isOvmg       = user.email.endsWith('@onevibemediagroup.com');
-  const hasFullAccess = isOvmg ||
-    user.roles.includes('admin') ||
-    user.roles.some(r => r !== 'sales');
-  return hasFullAccess ? null : denied;
-}
-
-// requireAdmin: OVMG email or 'admin' role
-export async function requireAdmin(event) {
-  const user = await getUser(event);
-  if (!user) return unauth;
-  const isOvmg    = user.email.endsWith('@onevibemediagroup.com');
-  const isAdmin   = isOvmg || user.roles.includes('admin') || user.role === 'admin';
-  return isAdmin ? null : denied;
-}
-
-/**
- * requireRole(event, rolesAllowed)
- * Returns null if the user has at least one of the listed roles (or is OVMG email / admin).
- * Returns a 403 response otherwise.
- */
-export async function requireRole(event, rolesAllowed = []) {
-  const user = await getUser(event);
-  if (!user) return unauth;
-  const isOvmg  = user.email.endsWith('@onevibemediagroup.com');
-  const isAdmin = isOvmg || user.roles.includes('admin');
-  if (isAdmin) return null; // admins pass any role gate
-  const allowed = user.roles.some(r => rolesAllowed.includes(r));
-  return allowed ? null : denied;
-}
+// OVMG employees whose roles were never set get the default 'member' role so
+// the app keeps working for the team — WITHOUT admin rights. External accounts
+// get no default role (they must be granted roles explicitly).
+export function effectiveRolesFor(user) {
+  if (!user) return [];
+  if (user.roles.length > 0) return user.roles;
+  return (user.email || '').toLowerCase().endsWith('@onevibemediagroup.com') ? ['member'] : 

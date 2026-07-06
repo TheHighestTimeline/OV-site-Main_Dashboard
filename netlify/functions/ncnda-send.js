@@ -13,7 +13,7 @@
 // Required Netlify env vars: see comment block in phase-5 version (unchanged).
 
 import { google } from 'googleapis';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 
 // Canonical sheet — DO NOT CHANGE. Downstream automations read from this.

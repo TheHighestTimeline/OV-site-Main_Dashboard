@@ -6,7 +6,7 @@
 // of activities-create.js's field map so this file has no import-order
 // dependency on that one.
 import { airtableCreate, toAirtableFields } from './_airtable.js';
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
 const TABLE = () => process.env.AIRTABLE_TABLE_ACTIVITIES || 'Activities';

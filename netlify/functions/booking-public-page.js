@@ -11,7 +11,7 @@
 //            half-hour blocks for the given date (or next 14 days if no date)
 
 import { google } from 'googleapis';
-import { CORS } from './_notion.js';
+import { CORS } from './_http.js';
 import { getSupabase } from './_supabase.js';
 import { getActiveGoogleClient, clientForTokens } from './_google.js';
 

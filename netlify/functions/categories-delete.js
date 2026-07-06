@@ -1,7 +1,7 @@
 // categories-delete — admin-only. Resources in the deleted category get their
 // category_id set to NULL automatically (FK is ON DELETE SET NULL).
 
-import { ok, err, CORS } from './_notion.js';
+import { ok, err, CORS } from './_http.js';
 import { requireAdmin } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 
