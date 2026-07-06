@@ -29,6 +29,11 @@ export default [
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-empty': ['warn', { allowEmptyCatch: true }],
       'react-hooks/exhaustive-deps': 'warn',
+      // ERROR, not warn: referencing a const before its declaration compiles
+      // fine but throws a TDZ ReferenceError at runtime — this exact bug
+      // white-screened production on 2026-07-05 (setView used in a hook deps
+      // array above its declaration in Dashboard.jsx).
+      'no-use-before-define': ['error', { functions: false, classes: false, variables: true }],
     },
   },
 

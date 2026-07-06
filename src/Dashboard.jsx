@@ -141,35 +141,10 @@ export default function Dashboard({ user, onLogout }) {
   const [scope, _setScope] = useState(loadScope);
   const setScope = useCallback((slug) => { _setScope(slug); saveScope(slug); }, []);
 
-  // ── Global search (Cmd/Ctrl-K) + g-shortcuts (2026-07 UI pass) ─────────────
-  // Press g then a letter to jump: g o Overview · g t Tasks · g k Kanban ·
-  // g c Contacts · g r Review · g m My Day. Ignored while typing in a field.
+  // ── Global search (Cmd/Ctrl-K) state — the key handler that uses setView
+  // lives BELOW setView's declaration (it crashed the whole app with a TDZ
+  // ReferenceError when it sat up here — 2026-07 white-screen fix).
   const [searchOpen, setSearchOpen] = useState(false);
-  useEffect(() => {
-    let goArmed = 0; // timestamp when 'g' was pressed
-    const isTyping = () => {
-      const el = document.activeElement;
-      return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
-    };
-    const GO = { o: 'overview', t: 'tasks', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day' };
-    const onKey = e => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setSearchOpen(o => !o);
-        return;
-      }
-      if (e.metaKey || e.ctrlKey || e.altKey || isTyping()) return;
-      const k = e.key.toLowerCase();
-      if (k === 'g') { goArmed = Date.now(); return; }
-      if (goArmed && Date.now() - goArmed < 900 && GO[k]) {
-        e.preventDefault();
-        setView(GO[k]);
-      }
-      goArmed = 0;
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [setView]);
 
   // ── Review queue badge (§4) — refresh every 5 min + on visit ──────────────
   const [reviewCount, setReviewCount] = useState(0);
@@ -208,6 +183,36 @@ export default function Dashboard({ user, onLogout }) {
       window.removeEventListener('popstate', onRoute);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── ⌘K + g-shortcuts (2026-07 UI pass) ─────────────────────────────────────
+  // Press g then a letter to jump: g o Overview · g t Tasks · g k Kanban ·
+  // g c Contacts · g r Review · g m My Day. Ignored while typing in a field.
+  // NOTE: must stay BELOW the setView declaration above (TDZ crash otherwise).
+  useEffect(() => {
+    let goArmed = 0; // timestamp when 'g' was pressed
+    const isTyping = () => {
+      const el = document.activeElement;
+      return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+    };
+    const GO = { o: 'overview', t: 'tasks', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day' };
+    const onKey = e => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(o => !o);
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping()) return;
+      const k = e.key.toLowerCase();
+      if (k === 'g') { goArmed = Date.now(); return; }
+      if (goArmed && Date.now() - goArmed < 900 && GO[k]) {
+        e.preventDefault();
+        setView(GO[k]);
+      }
+      goArmed = 0;
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [setView]);
 
   const showToast = m  => setToast(m);
   const closeOv   = () => setOv(null);
