@@ -10,7 +10,7 @@ import { ok, err, CORS } from './_http.js';
 import { requireAuth, getUser } from './_auth.js';
 import { logUsage } from './_usage.js';
 
-export const handler = async (event, context) => {
+export const handler = async (event, _context) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
   const authErr = await requireAuth(event);
   if (authErr) return authErr;
@@ -53,4 +53,20 @@ export const handler = async (event, context) => {
         event, service: 'openai', surface: 'voice-transcribe',
         operation: 'audio.transcriptions.create',
         model: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe',
-        minutes: 0.5,  // rough placeholder — refine
+        minutes: 0.5,  // rough placeholder — refine if response carries duration
+        user: u,
+      });
+    } catch (_e) { /* swallow */ }
+
+    // response_format:'text' returns a plain string
+    const transcript = typeof transcription === 'string' ? transcription : transcription.text || '';
+
+    return ok({ transcript: transcript.trim() });
+  } catch (e) {
+    console.error('transcribe error:', e);
+    return err(500, e.message);
+  } finally {
+    // Always clean up the temp file
+    if (tmpPath) await unlink(tmpPath).catch(() => {});
+  }
+};

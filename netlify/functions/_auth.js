@@ -79,4 +79,40 @@ export function isAdminUser(user) {
 export function effectiveRolesFor(user) {
   if (!user) return [];
   if (user.roles.length > 0) return user.roles;
-  return (user.email || '').toLowerCase().endsWith('@onevibemediagroup.com') ? ['member'] : 
+  return (user.email || '').toLowerCase().endsWith('@onevibemediagroup.com') ? ['member'] : [];
+}
+
+export async function requireAuth(event) {
+  const payload = await verifyClerkToken(event);
+  if (payload) return null;
+  return unauth;
+}
+
+// requireFullAccess: admin, or at least one non-sales role
+export async function requireFullAccess(event) {
+  const user = await getUser(event);
+  if (!user) return unauth;
+  const roles = effectiveRolesFor(user);
+  const hasFullAccess = isAdminUser(user) || roles.some(r => r !== 'sales');
+  return hasFullAccess ? null : denied;
+}
+
+// requireAdmin: 'admin' role or bootstrap allowlist ONLY (no domain bypass)
+export async function requireAdmin(event) {
+  const user = await getUser(event);
+  if (!user) return unauth;
+  return isAdminUser(user) ? null : denied;
+}
+
+/**
+ * requireRole(event, rolesAllowed)
+ * Returns null if the user has at least one of the listed roles (or is admin).
+ * Returns a 403 response otherwise.
+ */
+export async function requireRole(event, rolesAllowed = []) {
+  const user = await getUser(event);
+  if (!user) return unauth;
+  if (isAdminUser(user)) return null; // admins pass any role gate
+  const allowed = effectiveRolesFor(user).some(r => rolesAllowed.includes(r));
+  return allowed ? null : denied;
+}
