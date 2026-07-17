@@ -21,3 +21,7 @@ _MOVE_TO_DRIVE/
 
 # One-off local helper scripts
 *.bat
+
+# Scratch area for files Claude staged/moved (safe to delete manually)
+_to_delete/
+*.tgz

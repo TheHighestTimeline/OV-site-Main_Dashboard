@@ -74,12 +74,13 @@ function AccessDenied() {
 
 // ── Top-level nav items ───────────────────────────────────────────────────────
 const NAV_META = [
+  // Kanban is the home screen (2026-07: pipeline-first landing), so it leads.
+  { id: 'kanban',     icon: '▦', label: 'Kanban'     },
   { id: 'overview',   icon: '◇', label: 'Overview'   },
   { id: 'review',     icon: '☑', label: 'Review'     },
   { id: 'audio-dump', icon: '◎', label: 'Audio Dump', adminOnly: true },
   { id: 'contacts',   icon: '◉', label: 'Contacts'   },
   { id: 'tasks',      icon: '▤', label: 'Tasks'      },
-  { id: 'kanban',     icon: '▦', label: 'Kanban'     },
   { id: 'tools',      icon: '⚒', label: 'Tools'      },
   { id: 'references', icon: '⊞', label: 'References' },
   { id: 'settings',   icon: '⚙', label: 'Settings'   },
@@ -117,9 +118,9 @@ export default function Dashboard({ user, onLogout }) {
     return canAccess(user, item.id);
   });
 
-  // Default landing view
+  // Default landing view — the Kanban pipeline board is the main screen.
   const defaultView = (() => {
-    const preferred = ['overview', 'outreach'];
+    const preferred = ['kanban', 'overview', 'outreach'];
     for (const id of preferred) {
       if (NAV_ITEMS.some(n => n.id === id)) return id;
     }
@@ -247,12 +248,12 @@ export default function Dashboard({ user, onLogout }) {
       'review':     gateView('review',     <Review     {...ctx} />),
       'audio-dump': user.isAdmin ? <AudioDump {...ctx} /> : <AccessDenied />,
       // §3.1: the global company scope filters every scoped view below.
-      'contacts':   gateView('contacts',   <Contacts   {...ctx} companyFilter={scope} />),
+      'contacts':   gateView('contacts',   <Contacts   {...ctx} companyFilter={scope} initialParams={view === 'contacts' ? viewParams : null} />),
       'tasks':      gateView('tasks',      <Tasks      {...ctx} companyFilter={scope} initialFilter={view === 'tasks' ? viewParams : null} />),
       // Main Kanban — all companies' opportunities in one board
       // (internal/external + Kanban⇄List). Same data as each company's Kanban
       // tab, so cards created here surface on the matching company tab too.
-      'kanban':     gateView('kanban',     <Opportunities {...ctx} companyFilter={scope} viewMode="kanban" allowViewToggle />),
+      'kanban':     gateView('kanban',     <Opportunities {...ctx} companyFilter={scope} viewMode="kanban" allowViewToggle initialParams={view === 'kanban' ? viewParams : null} />),
       'settings':   gateView('settings',   <Settings   {...ctx} onLogout={onLogout} />),
       'admin':      gateView('admin',      <Admin      {...ctx} />),
       'cost':       user.isAdmin ? <CostDashboard {...ctx} /> : <AccessDenied />,

@@ -1,4 +1,4 @@
-import { airtableGet, airtableUpdate, toAirtableFields, TASKS_MAP } from './_airtable.js';
+import { airtableGet, airtableList, airtableUpdate, toAirtableFields, TASKS_MAP } from './_airtable.js';
 import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 
@@ -19,7 +19,6 @@ export const handler = async (event) => {
     if (task         !== undefined) update.task         = task;
     if (status       !== undefined) update.status       = status;
     if (priority     !== undefined) update.priority     = priority;
-    if (owner        !== undefined) update.owner        = owner;
     if (dueDate      !== undefined) update.dueDate      = dueDate || null;
     if (taskType     !== undefined) update.taskType     = taskType || null;
     if (entity       !== undefined) update.entity       = entity || null;
@@ -38,6 +37,28 @@ export const handler = async (event) => {
     }
 
     const fields = toAirtableFields(update, TASKS_MAP);
+
+    // 'Assigned To' is a LINKED field to CRM Contacts, but the UI collects the
+    // owner as free text. Previously the raw string was written with
+    // typecast:true, which silently CREATES a new (junk) CRM Contact whenever
+    // the spelling doesn't exactly match an existing record. Now: resolve to an
+    // existing contact by case-insensitive Full Name; no match → skip the write
+    // (never invent contacts). Empty string explicitly clears the assignment.
+    if (owner !== undefined) {
+      const trimmed = String(owner || '').trim();
+      if (!trimmed) {
+        fields['Assigned To'] = [];
+      } else {
+        try {
+          const CONTACTS_TBL = process.env.AIRTABLE_TABLE_CONTACTS || 'CRM Contacts';
+          const contacts = await airtableList(CONTACTS_TBL);
+          const match = contacts.find(c => String(c.fields?.['Full Name'] || '').trim().toLowerCase() === trimmed.toLowerCase());
+          if (match) fields['Assigned To'] = [match.id];
+          // no match → leave Assigned To untouched rather than creating a dup
+        } catch { /* contacts unreachable — skip owner write */ }
+      }
+    }
+
     // Linked-record fields (arrays of record IDs). Passing [] clears the link.
     if (contactIds        !== undefined) fields['Contact']         = Array.isArray(contactIds)        ? contactIds        : [];
     if (relatedProjectIds !== undefined) fields['Related Project'] = Array.isArray(relatedProjectIds) ? relatedProjectIds : [];

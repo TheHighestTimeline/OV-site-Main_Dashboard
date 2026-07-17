@@ -48,7 +48,7 @@ function ContactBadge({ c, compact = false }) {
   );
 }
 
-export default function Contacts({ user, showToast, openOv, closeOv, companyFilter = null }) {
+export default function Contacts({ user, showToast, openOv, closeOv, setView, companyFilter = null, initialParams = null }) {
   const isMobile = useIsMobile();
   const [contacts, setContacts] = useState([]);
   const [loading,  setLoading]  = useState(true);
@@ -99,6 +99,30 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
       .finally(() => setLoading(false));
   }, [showToast]);
   useEffect(() => { loadContacts(); }, [loadContacts]);
+
+  // Cross-view navigation params: another view (a kanban quick view, a task
+  // card, ⌘K search) can land here with { openContactId } / { openCompanyId }
+  // to pop the right profile or company snapshot, and/or { search } to
+  // pre-filter the table. Each params object is consumed exactly once so
+  // closing the overlay doesn't re-open it on the next data refresh.
+  const consumedParams = useRef(null);
+  useEffect(() => {
+    if (!initialParams || consumedParams.current === initialParams) return;
+    if (initialParams.search != null) setSearch(initialParams.search);
+    if (initialParams.openCompanyId) {
+      consumedParams.current = initialParams;
+      setActiveCompany({ id: initialParams.openCompanyId, name: initialParams.openCompanyName || '' });
+      return;
+    }
+    if (initialParams.openContactId) {
+      const c = contacts.find(x => x.id === initialParams.openContactId);
+      if (!c) return; // wait until contacts have loaded, then this re-runs
+      consumedParams.current = initialParams;
+      setActiveContact(c);
+      return;
+    }
+    consumedParams.current = initialParams;
+  }, [initialParams, contacts]);
 
   // Pinned contacts — persisted in the shared app-state store (syncs across devices).
   useEffect(() => {
@@ -495,13 +519,23 @@ export default function Contacts({ user, showToast, openOv, closeOv, companyFilt
         />
       )}
 
-      {/* Company snapshot (opened from a company chip in the table) */}
+      {/* Company snapshot (opened from a company chip in the table). The
+          onOpen* handlers make its People / Deals / Tasks rows clickable —
+          jumping to the contact profile, the kanban quick view, or the Tasks
+          board instead of dead-ending. */}
       {activeCompany && (
         <CompanySnapshot
           companyId={activeCompany.id}
           companyName={activeCompany.name}
           onClose={() => setActiveCompany(null)}
           showToast={showToast}
+          onOpenContact={(id) => {
+            const c = contacts.find(x => x.id === id);
+            if (c) { setActiveCompany(null); setActiveContact(c); }
+            else showToast?.('Contact not found in CRM list');
+          }}
+          onOpenOpp={setView ? (o) => { setActiveCompany(null); setView('kanban', { openOppId: o.id }); } : null}
+          onOpenTask={setView ? (t) => { setActiveCompany(null); setActiveContact(null); setView('tasks', { search: t.task }); } : null}
         />
       )}
 

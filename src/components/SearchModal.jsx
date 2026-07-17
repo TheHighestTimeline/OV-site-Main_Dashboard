@@ -132,8 +132,11 @@ export default function SearchModal({ onClose, setView }) {
     // Documents & references with a link open directly — fastest path to a file.
     const url = group === 'documents' ? item.driveLink : group === 'resources' ? item.url : null;
     if (url) { window.open(url, '_blank', 'noopener'); onClose(); return; }
-    const viewFor = { contacts: 'contacts', tasks: 'tasks', opps: 'kanban' };
-    if (viewFor[group]) { setView(viewFor[group], { search: primaryLabel(item, group) }); }
+    // Jump to the SPECIFIC record, not just its list view: contacts open the
+    // profile, opportunities pop the kanban quick view, tasks pre-fill search.
+    if (group === 'contacts') setView('contacts', { openContactId: item.id, search: item.name });
+    else if (group === 'opps') setView('kanban', { openOppId: item.id });
+    else if (group === 'tasks') setView('tasks', { search: primaryLabel(item, group) });
     onClose();
   };
 

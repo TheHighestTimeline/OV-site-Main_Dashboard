@@ -194,6 +194,7 @@ export default function ContactProfile({ contact, contactTableId, onClose, showT
           companyName={activeCompany.name}
           onClose={() => setActiveCompany(null)}
           showToast={showToast}
+          onOpenContact={onOpenContactId ? (id) => { setActiveCompany(null); onOpenContactId(id); } : null}
         />
       )}
 

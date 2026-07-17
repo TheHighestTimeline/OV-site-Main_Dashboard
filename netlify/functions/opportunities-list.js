@@ -5,6 +5,8 @@ import { requireAuth } from './_auth.js';
 const TABLE        = () => process.env.AIRTABLE_TABLE_OPPORTUNITIES || 'Opportunities';
 const PROJECTS_TBL = () => process.env.AIRTABLE_TABLE_PROJECTS      || 'Projects';
 const TASKS_TBL    = () => process.env.AIRTABLE_TABLE_TASKS         || 'Master Action Board';
+const COMPANIES_TBL= () => process.env.AIRTABLE_TABLE_COMPANIES     || 'Companies';
+const CONTACTS_TBL = () => process.env.AIRTABLE_TABLE_CONTACTS      || 'CRM Contacts';
 
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
@@ -12,13 +14,21 @@ export const handler = async (event) => {
   if (authErr) return authErr;
 
   try {
-    // Load opportunities plus the two tables we walk to connect them to tasks:
+    // Load opportunities plus the tables we walk to connect them to tasks:
     //   Opportunity --(Projects)--> Project --(Master Action Board)--> Task
-    const [records, projectRecs, taskRecs] = await Promise.all([
+    //   Opportunity --(Master Action Board)--> Task   (direct link)
+    // Companies/Contacts are loaded only to resolve linked-record names so the
+    // frontend can render clickable chips instead of raw record IDs.
+    const [records, projectRecs, taskRecs, companyRecs, contactRecs] = await Promise.all([
       airtableList(TABLE()),
       airtableList(PROJECTS_TBL()).catch(() => []),
       airtableList(TASKS_TBL()).catch(() => []),
+      airtableList(COMPANIES_TBL()).catch(() => []),
+      airtableList(CONTACTS_TBL()).catch(() => []),
     ]);
+
+    const companyNameById = Object.fromEntries(companyRecs.map(c => [c.id, c.fields?.['Name'] || '']));
+    const contactNameById = Object.fromEntries(contactRecs.map(c => [c.id, c.fields?.['Full Name'] || '']));
 
     // id -> task summary
     const taskById = Object.fromEntries(taskRecs.map(t => [t.id, {
@@ -41,10 +51,16 @@ export const handler = async (event) => {
       opp.projectIds = r.fields['Projects']           || [];
       opp.contactIds = r.fields['Associated Contact'] || [];
 
-      // Walk Opportunity -> Projects -> Tasks
+      // Resolved {id,name} pairs for clickable chips in the UI.
+      opp.companies = opp.companyIds.map(id => ({ id, name: companyNameById[id] || '' }));
+      opp.contacts  = opp.contactIds.map(id => ({ id, name: contactNameById[id] || '' }));
+
+      // Walk Opportunity -> Projects -> Tasks, PLUS the direct
+      // Opportunity <-> Master Action Board link (a task's 'Opportunity' field).
       opp.projectNames = opp.projectIds.map(id => projectById[id]?.name || id);
       const taskIdSet  = new Set();
       opp.projectIds.forEach(pid => (projectById[pid]?.taskIds || []).forEach(tid => taskIdSet.add(tid)));
+      (r.fields['Master Action Board'] || []).forEach(tid => taskIdSet.add(tid));
       opp.taskIds = [...taskIdSet];
       opp.tasks   = opp.taskIds.map(tid => taskById[tid]).filter(Boolean);
 

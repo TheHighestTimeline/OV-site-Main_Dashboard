@@ -16,10 +16,40 @@ import useIsMobile from '../hooks/useIsMobile.js';
 // Notion is the single source of truth; creates/edits/deletes write there.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Matches the Airtable "Opportunities" Stage single-select options exactly.
+// The six canonical pipeline lanes (kanban columns).
 const OPP_STAGES = [
   'Lead', 'Qualified', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost',
 ];
+
+// The live Airtable Stage single-select has 13 MORE options beyond the six
+// canonical lanes (verified against the base schema 2026-07). Previously any
+// card with one of these stages silently piled into the Lead lane AND the edit
+// form rewrote its real stage to "Lead" on save. Now: every stage is listed in
+// the form (grouped), and STAGE_LANE_ALIASES maps each extra stage to the lane
+// it should sit in on the board — without ever changing the record's true stage.
+const EXTRA_STAGES = [
+  'Prospect', 'Exploring', 'Forming', 'Due diligence', 'Underwriting',
+  'Structuring', 'Submitted', 'Verbal commit', 'Committed', 'Deposit pending',
+  'Active', 'In build', 'Delivered',
+];
+const STAGE_LANE_ALIASES = {
+  'Prospect':        'Lead',
+  'Exploring':       'Lead',
+  'Forming':         'Qualified',
+  'Due diligence':   'Qualified',
+  'Underwriting':    'Qualified',
+  'Structuring':     'Proposal',
+  'Submitted':       'Proposal',
+  'Verbal commit':   'Negotiation',
+  'Committed':       'Negotiation',
+  'Deposit pending': 'Negotiation',
+  'Active':          'Closed Won',
+  'In build':        'Closed Won',
+  'Delivered':       'Closed Won',
+};
+// Canonical lane for any stage value (unknown stages land in Lead).
+const canonicalStage = (stage) =>
+  OPP_STAGES.includes(stage) ? stage : (STAGE_LANE_ALIASES[stage] || 'Lead');
 
 const STAGE_STYLE = {
   'Lead':        { hBg: C.ink5,  hFg: '#fff', border: C.ink5  },
@@ -55,7 +85,7 @@ function defaultLanes() {
 function laneForCard(opp, lanes, assignments) {
   const assigned = assignments?.[opp.id];
   if (assigned && lanes.some(l => l.id === assigned)) return assigned;
-  const stage = OPP_STAGES.includes(opp.stage) ? opp.stage : 'Lead';
+  const stage = canonicalStage(opp.stage);
   const byStage = lanes.find(l => l.mapsTo === stage);
   return (byStage || lanes[0])?.id;
 }
@@ -135,7 +165,7 @@ const TASK_CYCLE = ['Not Started', 'In Progress', 'Done'];
 // Tasks tied to this opportunity via the Notion "Related Opportunities" relation.
 // They also surface on the company's Tasks board. Add / advance status / delete,
 // all synced straight to the Notion Tasks DB.
-function LinkedTasks({ oppId, companyCat, showToast }) {
+function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
   const [tasks, setTasks]   = useState(null);
   const [adding, setAdding] = useState(false);
   const [title, setTitle]   = useState('');
@@ -155,9 +185,12 @@ function LinkedTasks({ oppId, companyCat, showToast }) {
 
   const reload = useCallback(() => {
     getTasks()
-      .then(all => setTasks((all || []).filter(t => (t.opportunityIds || []).includes(oppId))))
+      .then(all => setTasks((all || []).filter(t =>
+        (t.opportunityIds || []).includes(oppId) ||
+        (extraTaskIds || []).includes(t.id)   // tasks reached via linked Projects
+      )))
       .catch(() => setTasks([]));
-  }, [oppId]);
+  }, [oppId, extraTaskIds]);
   useEffect(() => { if (oppId) reload(); }, [oppId, reload]);
 
   const add = async () => {
@@ -238,6 +271,78 @@ function LinkedTasks({ oppId, companyCat, showToast }) {
   );
 }
 
+// ── Opportunity quick view (kanban card click → tasks popup) ─────────────────
+// The popup that opens when a kanban card is clicked: the opportunity's key
+// facts up top, its linked company/contact as CLICKABLE chips (jump straight to
+// the CRM), and — front and center — the tasks underneath this opportunity
+// (add / advance / edit / remove, live against the Master Action Board).
+// Full editing stays one click away behind "Edit details".
+function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId }) {
+  const stage    = opp.stage || '—';
+  const lane     = canonicalStage(opp.stage);
+  const sStyle   = STAGE_STYLE[lane] || {};
+  const chips    = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 11, fontFamily: SANS, cursor: 'pointer', background: C.accS, color: C.accD, border: `1px solid ${C.acc}30` };
+
+  const goCompany = (co) => { onClose(); setView?.('contacts', { openCompanyId: co.id, openCompanyName: co.name }); };
+  const goContact = (ct) => { onClose(); setView?.('contacts', { openContactId: ct.id, search: ct.name }); };
+
+  return (
+    <Modal title={opp.name} onClose={onClose}>
+      {/* Fact row */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: sStyle.hBg || C.ink5, color: '#fff', borderRadius: 999, padding: '2px 9px' }}>
+          {stage}
+        </span>
+        {opp.dealValue > 0 && <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: C.grn }}>{fmtC(opp.dealValue)}</span>}
+        {opp.entity && <Tag bg={C.bg2} fg={C.ink7}>{opp.entity}</Tag>}
+        {opp.kanbanType && <Tag bg={opp.kanbanType === 'external' ? C.accS : C.bluS} fg={opp.kanbanType === 'external' ? C.acc : C.blu}>{opp.kanbanType === 'external' ? 'External' : 'Internal'}</Tag>}
+        {opp.priority && <Tag bg={C.yelS} fg={C.yel}>{opp.priority.replace(' Priority', '')}</Tag>}
+        {opp.closeDate && <span style={{ fontFamily: MONO, fontSize: 10, color: C.ink5 }}>closes {fmtD(opp.closeDate)}</span>}
+      </div>
+
+      {/* Linked company + contact — clickable, jumps into the CRM */}
+      {((opp.companies || []).length > 0 || (opp.contacts || []).length > 0) && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+          {(opp.companies || []).map(co => (
+            <button key={co.id} onClick={() => goCompany(co)} title="Open company snapshot" style={chips}>
+              ⌂ {co.name || 'Company'} <span style={{ fontSize: 9, opacity: .7 }}>↗</span>
+            </button>
+          ))}
+          {(opp.contacts || []).map(ct => (
+            <button key={ct.id} onClick={() => goContact(ct)} title="Open contact profile" style={{ ...chips, background: C.bluS, color: C.blu, border: `1px solid ${C.blu}30` }}>
+              ◉ {ct.name || 'Contact'} <span style={{ fontSize: 9, opacity: .7 }}>↗</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {opp.nextAction && (
+        <div style={{ fontSize: 12, color: C.ink7, marginBottom: 10 }}>
+          <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3 }}>Next action</span>
+          <div style={{ marginTop: 2 }}>{opp.nextAction}</div>
+        </div>
+      )}
+      {opp.notes && (
+        <div style={{ fontSize: 12, color: C.ink5, lineHeight: 1.55, marginBottom: 4, maxHeight: 88, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{opp.notes}</div>
+      )}
+
+      {/* THE point of this popup: the tasks underneath this opportunity */}
+      <LinkedTasks oppId={opp.id} companyCat={opp.entity} showToast={showToast} extraTaskIds={opp.taskIds} />
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, gap: 8, flexWrap: 'wrap' }}>
+        <a href={airtableRecordUrl(tableId, opp.id)} target="_blank" rel="noopener noreferrer"
+          style={{ fontFamily: MONO, fontSize: 11, color: C.ink5, textDecoration: 'none', whiteSpace: 'nowrap' }}>
+          ⊞ Airtable ↗
+        </a>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn v="gho" onClick={onClose}>Close</Btn>
+          <Btn onClick={onEdit}>✎ Edit details</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Opportunity form (create / edit) ─────────────────────────────────────────
 function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showToast, tableId }) {
   const [f, setF] = useState({
@@ -277,7 +382,17 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <FR label="Stage">
           <select value={f.stage} onChange={fld('stage')} style={inp}>
-            {OPP_STAGES.map(s => <option key={s}>{s}</option>)}
+            <optgroup label="Pipeline">
+              {OPP_STAGES.map(s => <option key={s}>{s}</option>)}
+            </optgroup>
+            <optgroup label="Other stages">
+              {EXTRA_STAGES.map(s => <option key={s}>{s}</option>)}
+            </optgroup>
+            {/* Safety net: never hide (and never silently rewrite) a stage
+                value that isn't in the known lists. */}
+            {f.stage && !OPP_STAGES.includes(f.stage) && !EXTRA_STAGES.includes(f.stage) && (
+              <option value={f.stage}>{f.stage}</option>
+            )}
           </select>
         </FR>
         <FR label="Entity / Company">
@@ -388,12 +503,21 @@ function KanbanCard({ opp, onClick, onDragStart, onAdvance, compact = false }) {
       )}
       {!compact && (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {/* True Airtable stage, shown when it isn't one of the six lane names
+              (e.g. "Structuring" sitting in the Proposal lane) — no data hidden. */}
+          {opp.stage && !OPP_STAGES.includes(opp.stage) && <Tag bg={C.bg2} fg={C.ink5}>{opp.stage}</Tag>}
           {opp.kanbanType === 'external' && <Tag bg={C.accS} fg={C.acc}>External</Tag>}
           {opp.kanbanType === 'internal' && <Tag bg={C.bluS} fg={C.blu}>Internal</Tag>}
           {opp.priority && <Tag bg={C.yelS} fg={C.yel}>{opp.priority.replace(' Priority', '')}</Tag>}
           {(opp.dealCategory || []).map(dc => (
             <span key={dc} style={{ fontFamily: MONO, fontSize: 9, color: C.acc, background: C.accS, border: `1px solid ${C.acc}30`, borderRadius: 999, padding: '1px 6px' }}>{dc}</span>
           ))}
+          {(opp.tasks || []).length > 0 && (
+            <span title={`${opp.tasks.length} linked task${opp.tasks.length !== 1 ? 's' : ''} — click card to view`}
+              style={{ fontFamily: MONO, fontSize: 9, color: C.ink5, background: C.bg2, border: `1px solid ${C.cr3}`, borderRadius: 999, padding: '1px 6px' }}>
+              ▤ {opp.tasks.length}
+            </span>
+          )}
         </div>
       )}
       {!compact && opp.nextAction && (
@@ -476,12 +600,16 @@ function KanbanLane({ lane, cards, dragOverLane, onCardClick, onDragStart, onDra
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function Opportunities({ showToast, openOv, closeOv, companyFilter = null, viewMode = 'list', allowViewToggle = false }) {
+// NOTE: the app-level router fn arrives as `setView` but is aliased to
+// `navigate` here because this component already uses `setView` for its own
+// local Kanban⇄List toggle state.
+export default function Opportunities({ showToast, openOv, closeOv, setView: navigate, companyFilter = null, viewMode = 'list', allowViewToggle = false, initialParams = null }) {
   const isMobile = useIsMobile();
   const [opps,    setOpps]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
   const [openId,  setOpenId]  = useState(null);   // list mode
+  const [quickId, setQuickId] = useState(null);   // kanban card → quick-view popup
   const [stageFilter, setStageFilter] = useState('All');
   // Kanban ⇄ List toggle (the merged Opportunities/Kanban surface) + the
   // internal vs external (client) filter that applies to both views.
@@ -595,6 +723,18 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
   }, [showToast]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Deep link / cross-link support: another view (a task card, the ⌘K search,
+  // a company snapshot) can land here with { openOppId } to pop the quick view
+  // for that opportunity as soon as the board has data.
+  const consumedParams = useRef(null);
+  useEffect(() => {
+    const id = initialParams?.openOppId;
+    if (!id || consumedParams.current === initialParams) return;
+    if (!opps.some(o => o.id === id)) return; // wait until loaded
+    consumedParams.current = initialParams;
+    setQuickId(id);
+  }, [initialParams, opps]);
 
   // Scope to this company's opportunities, then filter by stage/type/company selector
   const scoped = useMemo(() => {
@@ -812,6 +952,22 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
           <LaneEditor slug={pipelineSlug} lanes={lanes} onSave={saveLanes} onClose={() => setLaneEditorOpen(false)} />
         )}
 
+        {/* Card click → quick-view popup: the tasks underneath this opportunity */}
+        {quickId && (() => {
+          const qo = opps.find(o => o.id === quickId);
+          if (!qo) return null;
+          return (
+            <OppQuickView
+              opp={qo}
+              onClose={() => setQuickId(null)}
+              onEdit={() => { setQuickId(null); openForm(qo); }}
+              setView={navigate}
+              showToast={showToast}
+              tableId={oppTableId}
+            />
+          );
+        })()}
+
         {/* (Company pills row removed — company selection lives in the
             Company dropdown inside the control row, 2026-07 UI pass.) */}
 
@@ -839,7 +995,7 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {cards.map(o => (
-                      <KanbanCard key={o.id} opp={o} onClick={() => openForm(o)} onDragStart={() => {}} onAdvance={advanceCard} />
+                      <KanbanCard key={o.id} opp={o} onClick={() => setQuickId(o.id)} onDragStart={() => {}} onAdvance={advanceCard} />
                     ))}
                   </div>
                 </div>
@@ -860,7 +1016,7 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
                     collapsed={collapsedLanes.has(lane.id)}
                     onToggleCollapse={() => toggleCollapse(lane.id)}
                     onAdvance={advanceCard}
-                    onCardClick={opp => openForm(opp)}
+                    onCardClick={opp => setQuickId(opp.id)}
                     onDragStart={handleDragStart}
                     onDragOver={e => { e.preventDefault(); setDragOver(lane.id); }}
                     onDrop={e => handleDrop(e, lane)}
@@ -883,6 +1039,20 @@ export default function Opportunities({ showToast, openOv, closeOv, companyFilte
   return (
     <div>
       {confirmNode}
+      {quickId && (() => {
+        const qo = opps.find(o => o.id === quickId);
+        if (!qo) return null;
+        return (
+          <OppQuickView
+            opp={qo}
+            onClose={() => setQuickId(null)}
+            onEdit={() => { setQuickId(null); openForm(qo); }}
+            setView={navigate}
+            showToast={showToast}
+            tableId={oppTableId}
+          />
+        );
+      })()}
       {!companyFilter && (
         <>
           <Eyebrow>Pipeline</Eyebrow>

@@ -38,7 +38,7 @@ function Section({ title, count, children }) {
  * company's notes, documents (grouped by folder), open tasks, people, and
  * opportunities. Close with the × (top-right) or Esc to return to the contact.
  */
-export default function CompanySnapshot({ companyId, companyName, onClose, showToast }) {
+export default function CompanySnapshot({ companyId, companyName, onClose, showToast, onOpenContact = null, onOpenOpp = null, onOpenTask = null }) {
   const isMobile = useIsMobile();
   const [data, setData]   = useState(null);
   const [error, setError] = useState(null);
@@ -190,8 +190,14 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                   <div>
                     {data.openTasks.map(t => {
                       const overdue = isOverdue(t.dueDate);
+                      const clickable = !!onOpenTask;
                       return (
-                        <div key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 12px', background: C.bg2, border: `1px solid ${overdue ? C.red : C.cr2}`, borderRadius: 8, marginBottom: 6 }}>
+                        <div key={t.id}
+                          onClick={clickable ? () => onOpenTask(t) : undefined}
+                          title={clickable ? 'Find this task on the Tasks board' : undefined}
+                          style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 12px', background: C.bg2, border: `1px solid ${overdue ? C.red : C.cr2}`, borderRadius: 8, marginBottom: 6, cursor: clickable ? 'pointer' : 'default' }}
+                          onMouseEnter={clickable ? e => e.currentTarget.style.borderColor = C.ink5 : undefined}
+                          onMouseLeave={clickable ? e => e.currentTarget.style.borderColor = overdue ? C.red : C.cr2 : undefined}>
                           <span style={{ width: 8, height: 8, borderRadius: '50%', background: PRIORITY_COLORS[t.priority] || C.ink3, marginTop: 5, flexShrink: 0 }} />
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontSize: 13, color: C.ink9 }}>{t.task}</div>
@@ -202,6 +208,7 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                               {(t.contactNames || []).map(n => <Tag key={n} bg="transparent" fg={C.ink3}>{n}</Tag>)}
                             </div>
                           </div>
+                          {clickable && <span style={{ color: C.ink3, fontSize: 14, flexShrink: 0, alignSelf: 'center' }}>›</span>}
                         </div>
                       );
                     })}
@@ -212,12 +219,23 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
               {coTab === 'people' && <Section title="People" count={(data.people || []).length}>
                   {(data.people || []).length === 0 ? <Empty>No people linked.</Empty> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {data.people.map(p => (
-                        <div key={p.id} style={{ padding: '8px 10px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 8 }}>
-                          <div style={{ fontFamily: SERIF, fontSize: 13, color: C.ink9 }}>{p.name}</div>
-                          <div style={{ fontSize: 11, color: C.ink5 }}>{[p.role, p.email].filter(Boolean).join(' · ') || '—'}</div>
-                        </div>
-                      ))}
+                      {data.people.map(p => {
+                        const clickable = !!onOpenContact;
+                        return (
+                          <div key={p.id}
+                            onClick={clickable ? () => onOpenContact(p.id) : undefined}
+                            title={clickable ? 'Open contact profile' : undefined}
+                            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 8, cursor: clickable ? 'pointer' : 'default' }}
+                            onMouseEnter={clickable ? e => e.currentTarget.style.borderColor = C.ink5 : undefined}
+                            onMouseLeave={clickable ? e => e.currentTarget.style.borderColor = C.cr2 : undefined}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontFamily: SERIF, fontSize: 13, color: C.ink9 }}>{p.name}</div>
+                              <div style={{ fontSize: 11, color: C.ink5 }}>{[p.role, p.email].filter(Boolean).join(' · ') || '—'}</div>
+                            </div>
+                            {clickable && <span style={{ color: C.ink3, fontSize: 14, flexShrink: 0 }}>›</span>}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
               </Section>}
@@ -225,16 +243,27 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
               {coTab === 'deals' && <Section title="Opportunities" count={(data.opportunities || []).length}>
                   {(data.opportunities || []).length === 0 ? <Empty>No opportunities.</Empty> : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {data.opportunities.map(o => (
-                        <div key={o.id} style={{ padding: '8px 10px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 8 }}>
-                          <div style={{ fontFamily: SERIF, fontSize: 13, color: C.ink9 }}>{o.name}</div>
-                          <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
-                            {o.stage && <Tag bg="transparent" fg={C.ink5}>{o.stage}</Tag>}
-                            {money(o.dealValue) && <Tag bg="transparent" fg={C.ink5}>{money(o.dealValue)}</Tag>}
-                            {o.closeDate && <Tag bg="transparent" fg={C.ink5}>{fmtR(o.closeDate)}</Tag>}
+                      {data.opportunities.map(o => {
+                        const clickable = !!onOpenOpp;
+                        return (
+                          <div key={o.id}
+                            onClick={clickable ? () => onOpenOpp(o) : undefined}
+                            title={clickable ? 'Open on the Kanban board' : undefined}
+                            style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 8, cursor: clickable ? 'pointer' : 'default' }}
+                            onMouseEnter={clickable ? e => e.currentTarget.style.borderColor = C.ink5 : undefined}
+                            onMouseLeave={clickable ? e => e.currentTarget.style.borderColor = C.cr2 : undefined}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontFamily: SERIF, fontSize: 13, color: C.ink9 }}>{o.name}</div>
+                              <div style={{ display: 'flex', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                                {o.stage && <Tag bg="transparent" fg={C.ink5}>{o.stage}</Tag>}
+                                {money(o.dealValue) && <Tag bg="transparent" fg={C.ink5}>{money(o.dealValue)}</Tag>}
+                                {o.closeDate && <Tag bg="transparent" fg={C.ink5}>{fmtR(o.closeDate)}</Tag>}
+                              </div>
+                            </div>
+                            {clickable && <span style={{ color: C.ink3, fontSize: 14, flexShrink: 0 }}>›</span>}
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
               </Section>}

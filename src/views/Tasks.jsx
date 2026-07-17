@@ -3,7 +3,7 @@ import { C, SERIF, SANS, MONO, DB, STATUSES, prBg, prFg, stFg, dUntil, fmtD, fmt
 import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, PBar, useConfirm, FilterDropdown, FilterBar, SkeletonRows } from '../components/UI.jsx';
 import { cacheGet, cacheSet } from '../lib/cache.js';
 import { getTasks, createTask, updateTask, deleteTask, getTaskNotes, parseVoice, uploadFile, getOpportunities,
-         getProjects, getClients, getAirtableSchema, airtableRecordUrl } from '../api.js';
+         getProjects, getClients, getContacts, getAirtableSchema, airtableRecordUrl } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import { dealCategoryMatchesSlug, SLUG_TO_DEAL_CATEGORY } from '../constants/roles.js';
 
@@ -99,7 +99,7 @@ const TYPE_PILL = {
   Tanner:     ['accS', 'acc'],
 };
 
-export default function Tasks({ user, showToast, openOv, closeOv, companyFilter = null, initialFilter = null }) {
+export default function Tasks({ user, showToast, openOv, closeOv, setView, companyFilter = null, initialFilter = null }) {
   const isMobile = useIsMobile();
   const [tasks,     setTasks]     = useState([]);
   const [opps,      setOpps]      = useState([]);
@@ -113,7 +113,18 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
   const [tfWork,    setTfWork]    = useState('All'); // 'All' | 'internal' | 'external'
   const [tfSection, setTfSection] = useState('All'); // 'All' | section name | '__none__'
   const [tfDue,     setTfDue]     = useState(initialFilter?.due || 'All'); // 'All' | 'overdue'
+  const [tfSearch,  setTfSearch]  = useState(initialFilter?.search || '');
   const [collapsed, setCollapsed] = useState(new Set());
+
+  // React to cross-view navigation params even when Tasks is ALREADY mounted
+  // (Overview stat cards, ⌘K search, company-snapshot task rows). Previously
+  // these only seeded useState on first mount, so a second click did nothing.
+  useEffect(() => {
+    if (!initialFilter) return;
+    if (initialFilter.assignee != null) setTfAs(initialFilter.assignee);
+    if (initialFilter.due      != null) setTfDue(initialFilter.due);
+    if (initialFilter.search   != null) setTfSearch(initialFilter.search);
+  }, [initialFilter]);
   const didInitCollapse = useRef(false);
   const [confirmNode, confirm] = useConfirm();
 
@@ -176,6 +187,14 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
   useEffect(() => { getOpportunities().then(setOpps).catch(() => {}); }, []);
   useEffect(() => { getProjects().then(setProjects).catch(() => {}); }, []);
   useEffect(() => { getClients().then(setClients).catch(() => {}); }, []);
+  // CRM contacts for the edit form's Contact link (uses the shared cache the
+  // Contacts view maintains, so this is usually instant).
+  const [crmContacts, setCrmContacts] = useState([]);
+  useEffect(() => {
+    const cached = cacheGet('contacts');
+    if (cached) setCrmContacts(cached);
+    getContacts().then(cs => { cacheSet('contacts', cs); setCrmContacts(cs || []); }).catch(() => {});
+  }, []);
   const oppMap = (() => { const m = {}; opps.forEach(o => { m[o.id] = o; }); return m; })();
   const taskWorkType = (t) => {
     // Prefer the task's own Internal/External tag; fall back to its opportunity.
@@ -226,6 +245,12 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
 
   const filtered = tasks.filter(t => {
     if (companyFilter && !matchesCompany(t)) return false;
+    if (tfSearch.trim()) {
+      const oppNames = (t.opportunityIds || []).map(id => oppMap[id]?.name || '').join(' ');
+      const hay = [t.task, t.owner, t.taskType, oppNames, ...(t.dealCategory || []), ...(t.contactNames || [])]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(tfSearch.trim().toLowerCase())) return false;
+    }
     if (tfAs === '__me__' && !(t.owner || '').toLowerCase().startsWith(myFirst)) return false;
     if (tfAs !== 'All' && tfAs !== '__me__' && t.owner !== tfAs) return false;
     if (tfPr !== 'All' && t.priority !== tfPr) return false;
@@ -278,6 +303,7 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
     const [oppId,     setOppId]     = useState((initialTask.opportunityIds || [])[0] || '');
     const [projId,    setProjId]    = useState((initialTask.relatedProjectIds || [])[0] || '');
     const [cliId,     setCliId]     = useState((initialTask.clientIds || [])[0] || '');
+    const [ctcId,     setCtcId]     = useState((initialTask.contactIds || [])[0] || '');
     const [wtype,     setWtype]     = useState(initialTask.type || '');
     const [saving,    setSaving]    = useState(false);
     const sectionOpts = [...STANDARD_SECTIONS, ...extraLanes.filter(s => !STANDARD_SECTIONS.includes(s))];
@@ -312,7 +338,8 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
       wtype     !== (initialTask.type || '')     ||
       oppId     !== ((initialTask.opportunityIds   || [])[0] || '') ||
       projId    !== ((initialTask.relatedProjectIds || [])[0] || '') ||
-      cliId     !== ((initialTask.clientIds        || [])[0] || '');
+      cliId     !== ((initialTask.clientIds        || [])[0] || '') ||
+      ctcId     !== ((initialTask.contactIds       || [])[0] || '');
 
     // Load notes on mount
     useEffect(() => {
@@ -353,6 +380,7 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
           opportunityIds:    oppId  ? [oppId]  : [],
           relatedProjectIds: projId ? [projId] : [],
           clientIds:         cliId  ? [cliId]  : [],
+          contactIds:        ctcId  ? [ctcId]  : [],
         });
         showToast('Saved ✓');
         closeOv();
@@ -538,6 +566,12 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
               </Sel>
             </FR>
           </div>
+          <FR label="Contact (CRM)">
+            <Sel value={ctcId} onChange={e => setCtcId(e.target.value)}>
+              <option value="">— None</option>
+              {crmContacts.map(c => <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>)}
+            </Sel>
+          </FR>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -964,6 +998,39 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
             card. */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
           {t.taskType && <Tag bg={C[tpB]} fg={C[tpF]}>{t.taskType}</Tag>}
+          {/* Linked opportunity — CLICKABLE: jumps to the Kanban board and pops
+              that opportunity's quick view (its tasks underneath). */}
+          {(t.opportunityIds || []).slice(0, 1).map(oid => {
+            const o = oppMap[oid];
+            if (!o) return null;
+            return (
+              <button key={oid}
+                onClick={e => { e.stopPropagation(); setView?.('kanban', { openOppId: oid }); }}
+                title="Open on the Kanban board"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', background: C.accS, border: `1px solid ${C.acc}30`, borderRadius: 999, fontSize: 10, color: C.accD, fontFamily: MONO, cursor: 'pointer', maxWidth: 180 }}>
+                ◆ <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span> ↗
+              </button>
+            );
+          })}
+          {/* Linked contact(s) — CLICKABLE: opens the contact profile in the CRM. */}
+          {(t.contactIds || []).slice(0, 2).map((cid, i) => {
+            const name = (t.contactNames || [])[i];
+            if (!name || name === cid) return null;
+            return (
+              <button key={cid}
+                onClick={e => { e.stopPropagation(); setView?.('contacts', { openContactId: cid, search: name }); }}
+                title="Open contact profile"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', background: C.bluS, border: `1px solid ${C.blu}30`, borderRadius: 999, fontSize: 10, color: C.blu, fontFamily: MONO, cursor: 'pointer' }}>
+                ◉ {name} ↗
+              </button>
+            );
+          })}
+          {/* Company / deal-category pill (all-companies board only — it'd
+              repeat on every card of a single-company page). Was documented but
+              never rendered; now it is. */}
+          {showDealPill && (t.dealCategory || []).slice(0, 1).map(dc => (
+            <span key={dc} style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', background: C.bg2, border: `1px solid ${C.cr3}`, borderRadius: 999, fontSize: 10, color: C.ink5, fontFamily: MONO }}>{dc}</span>
+          ))}
           {(t.relatedProjectNames || []).map((pn, i) => (
             <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', background: C.bg2, border: `1px solid ${C.cr3}`, borderRadius: 999, fontSize: 10, color: C.ink7, fontFamily: MONO }}>
               <span style={{ color: C.acc }}>▸</span>{pn}
@@ -1117,6 +1184,13 @@ export default function Tasks({ user, showToast, openOv, closeOv, companyFilter 
               ◉ new tasks tag → {activeCompanyCategory}
             </span>
           )}
+          <span style={{ position: 'relative', display: 'inline-block' }}>
+            <Inp value={tfSearch} onChange={e => setTfSearch(e.target.value)} placeholder="Search tasks…" sx={{ width: 170, paddingRight: 26 }} />
+            {tfSearch && (
+              <button onClick={() => setTfSearch('')} title="Clear search"
+                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: C.ink3, fontSize: 14, cursor: 'pointer', padding: 0, lineHeight: 1 }}>×</button>
+            )}
+          </span>
           <Btn v="gho" onClick={() => openOv({ kind: 'modal', title: 'Voice create task', body: <VoiceTaskForm /> })}>◉ Voice</Btn>
           {companyFilter && (
             <Btn v="gho" onClick={() => openOv({ kind: 'modal', title: 'Add section', body: <AddSectionForm /> })}>+ Section</Btn>

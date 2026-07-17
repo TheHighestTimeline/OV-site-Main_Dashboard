@@ -26,10 +26,14 @@ export default function Overview({ user, showToast, setView, openOv, closeOv }) 
   const contacts = data?.contacts || [];
   const outreach = Array.isArray(data?.outreach) ? data.outreach : (data?.outreach?.leads || []);
 
-  const overdue  = tasks.filter(t => { const d = dUntil(t.dueDate); return d !== null && d < 0; }).length;
+  // "Active" excludes terminal statuses — the number previously counted Done/
+  // Canceled tasks too, so it never matched what the board showed.
+  const TERMINAL  = new Set(['done', 'complete', 'completed', 'canceled', 'cancelled']);
+  const active    = tasks.filter(t => !TERMINAL.has(String(t.status || '').toLowerCase().trim()));
+  const overdue  = active.filter(t => { const d = dUntil(t.dueDate); return d !== null && d < 0; }).length;
   const myFirst  = user.fullName.split(' ')[0].toLowerCase();
-  const mine     = tasks.filter(t => (t.owner || '').toLowerCase().startsWith(myFirst)).length;
-  const upcoming = [...tasks].filter(t => t.dueDate).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
+  const mine     = active.filter(t => (t.owner || '').toLowerCase().startsWith(myFirst)).length;
+  const upcoming = [...active].filter(t => t.dueDate).sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)).slice(0, 5);
   const activeGoals = goals.filter(g => g.status !== 'Done').slice(0, 4);
 
   return (
@@ -45,7 +49,7 @@ export default function Overview({ user, showToast, setView, openOv, closeOv }) 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(3,1fr)', gap: 12, marginBottom: 22 }}>
         {[
           // §9: each card routes to the Tasks page with the matching filter applied.
-          { l: 'Active tasks', v: tasks.length, s: 'awaiting action', a: false, click: () => setView('tasks') },
+          { l: 'Active tasks', v: active.length, s: 'awaiting action', a: false, click: () => setView('tasks') },
           { l: 'My tasks',     v: mine,         s: 'assigned to me',  a: false, click: () => setView('tasks', { assignee: '__me__' }) },
           { l: 'Overdue',      v: overdue,      s: 'past due',        a: true,  click: () => setView('tasks', { due: 'overdue' }) },
         ].map(stat => (
