@@ -21,7 +21,8 @@ export const handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); } catch { return err(400, 'Invalid JSON'); }
 
   const { id, name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
-          nextStep, dataRoom, companyIds, contactIds, projectIds } = body;
+          nextStep, dataRoom, priority, kind, otherParty, probability,
+          companyIds, contactIds, projectIds } = body;
   if (!id) return err(400, 'id is required');
 
   try {
@@ -34,6 +35,11 @@ export const handler = async (event) => {
     if (entity    !== undefined) update.entity    = entity || null;
     if (nextStep  !== undefined) update.nextStep  = nextStep;
     if (dataRoom  !== undefined) update.dataRoom  = dataRoom;
+    if (priority  !== undefined) update.priority  = priority || null;
+    if (kind      !== undefined) update.kind      = kind || null;
+    if (otherParty !== undefined) update.otherParty = otherParty;
+    // Airtable percent fields store a 0–1 fraction; the UI works in 0–100.
+    if (probability !== undefined) update.probability = probability != null && probability !== '' ? Number(probability) / 100 : null;
     const t = normType(type, kanbanType);
     if (t !== undefined) update.type = t;
 

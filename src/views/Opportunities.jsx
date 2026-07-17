@@ -3,7 +3,7 @@ import { C, SERIF, SANS, MONO, stBg, stFg, prBg, prFg, fmtC, fmtD } from '../con
 import { Eyebrow, Tag, Spinner, Btn, Inp, Sel, FR, useConfirm, Modal, FilterDropdown, SkeletonKanban, EmptyState } from '../components/UI.jsx';
 import { cacheGet, cacheSet } from '../lib/cache.js';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
-         getTasks, createTask, updateTask, deleteTask,
+         getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
          getAirtableSchema, airtableRecordUrl, getAppState, setAppState } from '../api.js';
 import { dealCategoryMatchesSlug, SLUG_TO_DEAL_CATEGORY, COMPANIES, COMPANY_META } from '../constants/roles.js';
 import useIsMobile from '../hooks/useIsMobile.js';
@@ -271,60 +271,195 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
   );
 }
 
-// ── Opportunity quick view (kanban card click → tasks popup) ─────────────────
-// The popup that opens when a kanban card is clicked: the opportunity's key
-// facts up top, its linked company/contact as CLICKABLE chips (jump straight to
-// the CRM), and — front and center — the tasks underneath this opportunity
-// (add / advance / edit / remove, live against the Master Action Board).
-// Full editing stays one click away behind "Edit details".
-function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId }) {
-  const stage    = opp.stage || '—';
-  const lane     = canonicalStage(opp.stage);
-  const sStyle   = STAGE_STYLE[lane] || {};
-  const chips    = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 11, fontFamily: SANS, cursor: 'pointer', background: C.accS, color: C.accD, border: `1px solid ${C.acc}30` };
+// ── Opportunity quick view (kanban card click → live-edit + tasks popup) ─────
+// The popup that opens when a kanban card is clicked. EVERY field is a live
+// entry field — change it and it saves to Airtable immediately (optimistic,
+// with a toast + revert on failure) via onPatch. Linked company/contact are
+// both editable pickers AND clickable chips that jump into the CRM. The tasks
+// underneath this opportunity sit at the bottom (add / advance / edit / remove,
+// live against the Master Action Board).
+function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList }) {
+  const lane   = canonicalStage(opp.stage);
+  const sStyle = STAGE_STYLE[lane] || {};
+  const save   = (patch) => onPatch(opp.id, patch);
+
+  // Text-ish fields buffer locally and save on blur (so we don't write to
+  // Airtable per keystroke). Selects/date save on change.
+  const [nextStep,  setNextStep]  = useState(opp.nextStep || opp.nextAction || '');
+  const [notes,     setNotes]     = useState(opp.notes || '');
+  const [value,     setValue]     = useState(opp.dealValue != null ? String(opp.dealValue) : '');
+  const [prob,      setProb]      = useState(opp.probability != null ? String(opp.probability) : '');
+  const [otherParty,setOtherParty]= useState(opp.otherParty || '');
+  const [dataRoom,  setDataRoom]  = useState(opp.dataRoom || '');
+  useEffect(() => {
+    setNextStep(opp.nextStep || opp.nextAction || ''); setNotes(opp.notes || '');
+    setValue(opp.dealValue != null ? String(opp.dealValue) : '');
+    setProb(opp.probability != null ? String(opp.probability) : '');
+    setOtherParty(opp.otherParty || ''); setDataRoom(opp.dataRoom || '');
+  }, [opp.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const inp = { background: C.bg2, border: `1px solid ${C.cr3}`, borderRadius: 8, padding: '6px 10px', fontFamily: SANS, fontSize: 12.5, color: C.ink9, width: '100%', boxSizing: 'border-box', outline: 'none' };
+  const lbl = { fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, display: 'block', marginBottom: 3 };
+  const chips = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 11, fontFamily: SANS, cursor: 'pointer', background: C.accS, color: C.accD, border: `1px solid ${C.acc}30` };
 
   const goCompany = (co) => { onClose(); setView?.('contacts', { openCompanyId: co.id, openCompanyName: co.name }); };
   const goContact = (ct) => { onClose(); setView?.('contacts', { openContactId: ct.id, search: ct.name }); };
 
+  const addCompany = (id) => {
+    if (!id) return;
+    const co = (companiesList || []).find(c => c.id === id);
+    const nextIds = [...(opp.companyIds || []), id];
+    save({ companyIds: nextIds, companies: [...(opp.companies || []), { id, name: co?.name || '' }] });
+  };
+  const removeCompany = (id) => {
+    save({
+      companyIds: (opp.companyIds || []).filter(x => x !== id),
+      companies:  (opp.companies  || []).filter(x => x.id !== id),
+    });
+  };
+  const setContact = (id) => {
+    const ct = (contactsList || []).find(c => c.id === id);
+    save({ contactIds: id ? [id] : [], contacts: id ? [{ id, name: ct?.name || '' }] : [] });
+  };
+
   return (
     <Modal title={opp.name} onClose={onClose}>
-      {/* Fact row */}
+      {/* Lane badge + entity — everything below it is editable in place */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: sStyle.hBg || C.ink5, color: '#fff', borderRadius: 999, padding: '2px 9px' }}>
-          {stage}
+          {lane}{opp.stage && opp.stage !== lane ? ` · ${opp.stage}` : ''}
         </span>
         {opp.dealValue > 0 && <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: C.grn }}>{fmtC(opp.dealValue)}</span>}
-        {opp.entity && <Tag bg={C.bg2} fg={C.ink7}>{opp.entity}</Tag>}
-        {opp.kanbanType && <Tag bg={opp.kanbanType === 'external' ? C.accS : C.bluS} fg={opp.kanbanType === 'external' ? C.acc : C.blu}>{opp.kanbanType === 'external' ? 'External' : 'Internal'}</Tag>}
-        {opp.priority && <Tag bg={C.yelS} fg={C.yel}>{opp.priority.replace(' Priority', '')}</Tag>}
-        {opp.closeDate && <span style={{ fontFamily: MONO, fontSize: 10, color: C.ink5 }}>closes {fmtD(opp.closeDate)}</span>}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>edits save instantly</span>
       </div>
 
-      {/* Linked company + contact — clickable, jumps into the CRM */}
-      {((opp.companies || []).length > 0 || (opp.contacts || []).length > 0) && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-          {(opp.companies || []).map(co => (
-            <button key={co.id} onClick={() => goCompany(co)} title="Open company snapshot" style={chips}>
-              ⌂ {co.name || 'Company'} <span style={{ fontSize: 9, opacity: .7 }}>↗</span>
-            </button>
-          ))}
-          {(opp.contacts || []).map(ct => (
-            <button key={ct.id} onClick={() => goContact(ct)} title="Open contact profile" style={{ ...chips, background: C.bluS, color: C.blu, border: `1px solid ${C.blu}30` }}>
-              ◉ {ct.name || 'Contact'} <span style={{ fontSize: 9, opacity: .7 }}>↗</span>
-            </button>
-          ))}
+      {/* ── Live entry fields ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div>
+          <span style={lbl}>Stage</span>
+          <select value={opp.stage || 'Lead'} onChange={e => save({ stage: e.target.value })} style={inp}>
+            <optgroup label="Pipeline">{OPP_STAGES.map(s => <option key={s}>{s}</option>)}</optgroup>
+            <optgroup label="Other stages">{EXTRA_STAGES.map(s => <option key={s}>{s}</option>)}</optgroup>
+            {opp.stage && !OPP_STAGES.includes(opp.stage) && !EXTRA_STAGES.includes(opp.stage) && <option value={opp.stage}>{opp.stage}</option>}
+          </select>
         </div>
-      )}
+        <div>
+          <span style={lbl}>Entity / Company tab</span>
+          <select value={opp.entity || ''} onChange={e => save({ entity: e.target.value || null, dealCategory: e.target.value ? [e.target.value] : [] })} style={inp}>
+            <option value="">— None</option>
+            {ENTITIES.map(c => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+        <div>
+          <span style={lbl}>Priority</span>
+          <select value={opp.priority || ''} onChange={e => save({ priority: e.target.value || null })} style={inp}>
+            <option value="">— None</option>
+            <option>High</option><option>Medium</option><option>Low</option>
+          </select>
+        </div>
+        <div>
+          <span style={lbl}>Kind</span>
+          <select value={opp.kind || ''} onChange={e => save({ kind: e.target.value || null })} style={inp}>
+            <option value="">— None</option>
+            <option>Deal</option><option>Workstream</option>
+          </select>
+        </div>
+        <div>
+          <span style={lbl}>Deal value ($)</span>
+          <input type="number" value={value} onChange={e => setValue(e.target.value)}
+            onBlur={() => { const n = value === '' ? null : parseFloat(value); if (n !== (opp.dealValue ?? null)) save({ dealValue: n }); }}
+            placeholder="0" style={inp} />
+        </div>
+        <div>
+          <span style={lbl}>Close date</span>
+          <input type="date" value={opp.closeDate || ''} onChange={e => save({ closeDate: e.target.value || null })} style={inp} />
+        </div>
+        <div>
+          <span style={lbl}>Probability (%)</span>
+          <input type="number" min="0" max="100" value={prob} onChange={e => setProb(e.target.value)}
+            onBlur={() => { const n = prob === '' ? null : Math.max(0, Math.min(100, parseFloat(prob))); if (n !== (opp.probability ?? null)) save({ probability: n }); }}
+            placeholder="—" style={inp} />
+        </div>
+        <div>
+          <span style={lbl}>Type</span>
+          <select value={opp.kanbanType || ''} onChange={e => save({ kanbanType: e.target.value || null, type: e.target.value ? (e.target.value === 'external' ? 'External' : 'Internal') : null })} style={inp}>
+            <option value="">— Unset</option>
+            <option value="internal">Internal</option>
+            <option value="external">External (client)</option>
+          </select>
+        </div>
+      </div>
 
-      {opp.nextAction && (
-        <div style={{ fontSize: 12, color: C.ink7, marginBottom: 10 }}>
-          <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3 }}>Next action</span>
-          <div style={{ marginTop: 2 }}>{opp.nextAction}</div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={lbl}>Next step</span>
+        <input value={nextStep} onChange={e => setNextStep(e.target.value)}
+          onBlur={() => { if (nextStep !== (opp.nextStep || '')) save({ nextStep, nextAction: nextStep }); }}
+          placeholder="What moves this forward?" style={inp} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        <div>
+          <span style={lbl}>Other party</span>
+          <input value={otherParty} onChange={e => setOtherParty(e.target.value)}
+            onBlur={() => { if (otherParty !== (opp.otherParty || '')) save({ otherParty }); }}
+            placeholder="Counterparty name" style={inp} />
         </div>
-      )}
-      {opp.notes && (
-        <div style={{ fontSize: 12, color: C.ink5, lineHeight: 1.55, marginBottom: 4, maxHeight: 88, overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{opp.notes}</div>
-      )}
+        <div>
+          <span style={lbl}>Data room (URL)</span>
+          <input value={dataRoom} onChange={e => setDataRoom(e.target.value)}
+            onBlur={() => { if (dataRoom !== (opp.dataRoom || '')) save({ dataRoom }); }}
+            placeholder="https://drive.google.com/…" style={inp} />
+        </div>
+      </div>
+
+      {/* ── Linked CRM company (multi) — chips jump to the snapshot, ×
+             unlinks, dropdown adds ── */}
+      <div style={{ marginBottom: 10 }}>
+        <span style={lbl}>Companies (CRM)</span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {(opp.companies || []).map(co => (
+            <span key={co.id} style={{ ...chips, cursor: 'default' }}>
+              <span onClick={() => goCompany(co)} title="Open company snapshot" style={{ cursor: 'pointer' }}>⌂ {co.name || 'Company'} ↗</span>
+              <span onClick={() => removeCompany(co.id)} title="Unlink company" style={{ cursor: 'pointer', opacity: .6, marginLeft: 2 }}>×</span>
+            </span>
+          ))}
+          <select value="" onChange={e => addCompany(e.target.value)}
+            style={{ ...inp, width: 'auto', padding: '4px 8px', fontSize: 11 }} disabled={!companiesList?.length}>
+            <option value="">{companiesList?.length ? '+ Link company…' : 'Loading companies…'}</option>
+            {(companiesList || [])
+              .filter(c => !(opp.companyIds || []).includes(c.id))
+              .map(c => <option key={c.id} value={c.id}>{c.name}{c.entityCode ? ` (${c.entityCode})` : ''}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* ── Linked CRM contact — chip jumps to the profile, dropdown re-links ── */}
+      <div style={{ marginBottom: 12 }}>
+        <span style={lbl}>Contact (CRM)</span>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {(opp.contacts || []).map(ct => (
+            <span key={ct.id} style={{ ...chips, background: C.bluS, color: C.blu, border: `1px solid ${C.blu}30`, cursor: 'default' }}>
+              <span onClick={() => goContact(ct)} title="Open contact profile" style={{ cursor: 'pointer' }}>◉ {ct.name || 'Contact'} ↗</span>
+              <span onClick={() => setContact('')} title="Unlink contact" style={{ cursor: 'pointer', opacity: .6, marginLeft: 2 }}>×</span>
+            </span>
+          ))}
+          {(opp.contacts || []).length === 0 && (
+            <select value="" onChange={e => setContact(e.target.value)}
+              style={{ ...inp, width: 'auto', padding: '4px 8px', fontSize: 11 }} disabled={!contactsList?.length}>
+              <option value="">{contactsList?.length ? '+ Link contact…' : 'Loading contacts…'}</option>
+              {(contactsList || []).map(c => <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>)}
+            </select>
+          )}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 4 }}>
+        <span style={lbl}>Notes</span>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+          onBlur={() => { if (notes !== (opp.notes || '')) save({ notes }); }}
+          placeholder="Key context…" style={{ ...inp, resize: 'vertical', lineHeight: 1.5 }} />
+      </div>
 
       {/* THE point of this popup: the tasks underneath this opportunity */}
       <LinkedTasks oppId={opp.id} companyCat={opp.entity} showToast={showToast} extraTaskIds={opp.taskIds} />
@@ -335,8 +470,8 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId }) {
           ⊞ Airtable ↗
         </a>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Btn v="gho" onClick={onClose}>Close</Btn>
-          <Btn onClick={onEdit}>✎ Edit details</Btn>
+          <Btn v="gho" onClick={onEdit} title="Rename or delete">✎ Rename / delete</Btn>
+          <Btn onClick={onClose}>Done</Btn>
         </div>
       </div>
     </Modal>
@@ -360,6 +495,12 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
     kanbanType: initial?.kanbanType || '',
     // §7: linked CRM contact (Airtable 'Associated Contact')
     contactId: (initial?.contactIds || [])[0] || '',
+    priority:    initial?.priority || '',
+    kind:        initial?.kind || '',
+    probability: initial?.probability != null ? String(initial.probability) : '',
+    nextStep:    initial?.nextStep || '',
+    otherParty:  initial?.otherParty || '',
+    dataRoom:    initial?.dataRoom || '',
   });
   const fld = k => e => setF(p => ({ ...p, [k]: e.target.value }));
   const isEdit = !!initial?.id;
@@ -408,6 +549,34 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
         </FR>
         <FR label="Close Date"><Inp type="date" value={f.closeDate} onChange={fld('closeDate')} /></FR>
       </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+        <FR label="Priority">
+          <select value={f.priority} onChange={fld('priority')} style={inp}>
+            <option value="">— None</option>
+            <option>High</option><option>Medium</option><option>Low</option>
+          </select>
+        </FR>
+        <FR label="Kind">
+          <select value={f.kind} onChange={fld('kind')} style={inp}>
+            <option value="">— None</option>
+            <option>Deal</option><option>Workstream</option>
+          </select>
+        </FR>
+        <FR label="Probability (%)">
+          <Inp type="number" value={f.probability} onChange={fld('probability')} placeholder="—" />
+        </FR>
+      </div>
+      <FR label="Next Step">
+        <Inp value={f.nextStep} onChange={fld('nextStep')} placeholder="What moves this forward?" />
+      </FR>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <FR label="Other Party">
+          <Inp value={f.otherParty} onChange={fld('otherParty')} placeholder="Counterparty name" />
+        </FR>
+        <FR label="Data Room (URL)">
+          <Inp value={f.dataRoom} onChange={fld('dataRoom')} placeholder="https://drive.google.com/…" />
+        </FR>
+      </div>
       <FR label="Type">
         <div style={{ display: 'flex', gap: 6 }}>
           {[['', 'Unset'], ['internal', 'Internal'], ['external', 'External (client)']].map(([val, lbl]) => {
@@ -451,7 +620,7 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn v="gho" onClick={onClose} disabled={saving}>Cancel</Btn>
-          <Btn onClick={() => { if (!f.name.trim()) { showToast?.('Name required'); return; } const { contactId, ...rest } = f; onSave({ ...rest, contactIds: contactId ? [contactId] : [], dealValue: f.dealValue ? parseFloat(f.dealValue) : null, dealCategory: f.dealCategory ? [f.dealCategory] : [] }); }} disabled={saving || !f.name.trim()}>
+          <Btn onClick={() => { if (!f.name.trim()) { showToast?.('Name required'); return; } const { contactId, ...rest } = f; onSave({ ...rest, contactIds: contactId ? [contactId] : [], dealValue: f.dealValue ? parseFloat(f.dealValue) : null, probability: f.probability !== '' ? parseFloat(f.probability) : null, dealCategory: f.entity ? [f.entity] : [] }); }} disabled={saving || !f.name.trim()}>
             {saving ? 'Saving…' : isEdit ? 'Save' : 'Create'}
           </Btn>
         </div>
@@ -508,6 +677,7 @@ function KanbanCard({ opp, onClick, onDragStart, onAdvance, compact = false }) {
           {opp.stage && !OPP_STAGES.includes(opp.stage) && <Tag bg={C.bg2} fg={C.ink5}>{opp.stage}</Tag>}
           {opp.kanbanType === 'external' && <Tag bg={C.accS} fg={C.acc}>External</Tag>}
           {opp.kanbanType === 'internal' && <Tag bg={C.bluS} fg={C.blu}>Internal</Tag>}
+          {opp.kind && <Tag bg="transparent" fg={C.ink5}>{opp.kind}</Tag>}
           {opp.priority && <Tag bg={C.yelS} fg={C.yel}>{opp.priority.replace(' Priority', '')}</Tag>}
           {(opp.dealCategory || []).map(dc => (
             <span key={dc} style={{ fontFamily: MONO, fontSize: 9, color: C.acc, background: C.accS, border: `1px solid ${C.acc}30`, borderRadius: 999, padding: '1px 6px' }}>{dc}</span>
@@ -723,6 +893,29 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
   }, [showToast]);
 
   useEffect(() => { load(); }, [load]);
+
+  // CRM pickers for the quick view's live company/contact link fields.
+  const [companiesList, setCompaniesList] = useState([]);
+  const [contactsList,  setContactsList]  = useState([]);
+  useEffect(() => {
+    getCompanies().then(cs => setCompaniesList((cs || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')))).catch(() => {});
+    const cached = cacheGet('contacts');
+    if (cached) setContactsList(cached);
+    getContacts().then(cs => { cacheSet('contacts', cs); setContactsList(cs || []); }).catch(() => {});
+  }, []);
+
+  // Live-edit a single opportunity field: optimistic local update + immediate
+  // Airtable write; on failure the toast reports it and a reload restores truth.
+  const patchOpp = useCallback(async (id, patch) => {
+    setOpps(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
+    try {
+      await updateOpportunity(id, patch);
+      showToast?.('Saved ✓');
+    } catch (e) {
+      showToast?.('Save failed: ' + e.message);
+      load();
+    }
+  }, [showToast, load]);
 
   // Deep link / cross-link support: another view (a task card, the ⌘K search,
   // a company snapshot) can land here with { openOppId } to pop the quick view
@@ -964,6 +1157,9 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               setView={navigate}
               showToast={showToast}
               tableId={oppTableId}
+              onPatch={patchOpp}
+              companiesList={companiesList}
+              contactsList={contactsList}
             />
           );
         })()}
@@ -1050,6 +1246,9 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
             setView={navigate}
             showToast={showToast}
             tableId={oppTableId}
+            onPatch={patchOpp}
+            companiesList={companiesList}
+            contactsList={contactsList}
           />
         );
       })()}

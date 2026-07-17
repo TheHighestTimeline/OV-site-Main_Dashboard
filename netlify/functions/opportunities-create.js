@@ -22,6 +22,7 @@ export const handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); } catch { return err(400, 'Invalid JSON'); }
 
   const { name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
+          nextStep, dataRoom, priority, kind, otherParty, probability,
           companyIds, contactIds, projectIds } = body;
   if (!name) return err(400, 'name is required');
 
@@ -30,6 +31,12 @@ export const handler = async (event) => {
     if (dealValue != null && dealValue !== '') obj.dealValue = Number(dealValue);
     if (closeDate)  obj.closeDate = closeDate;
     if (entity)     obj.entity    = entity;
+    if (nextStep)   obj.nextStep  = nextStep;
+    if (dataRoom)   obj.dataRoom  = dataRoom;
+    if (priority)   obj.priority  = priority;
+    if (kind)       obj.kind      = kind;
+    if (otherParty) obj.otherParty = otherParty;
+    if (probability != null && probability !== '') obj.probability = Number(probability) / 100; // UI 0–100 → Airtable 0–1
     const t = normType(type, kanbanType);
     if (t)          obj.type      = t;
 

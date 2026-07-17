@@ -302,6 +302,9 @@ export const OPPORTUNITIES_MAP = {
   type:        'Type',     // singleSelect Internal/External
   nextStep:    'Next Step',
   dataRoom:    'Data Room', // added 2026-07 — deal data-room URL, shown on contact Deals tab
+  priority:    'Priority',  // singleSelect High/Medium/Low (added 2026-07-16)
+  kind:        'Kind',      // singleSelect Deal/Workstream (added 2026-07-16)
+  otherParty:  'Other Party',
 };
 
 export const OUTREACH_MAP = {

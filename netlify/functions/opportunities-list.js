@@ -68,6 +68,11 @@ export const handler = async (event) => {
       opp.dealCategory = opp.entity ? [opp.entity] : [];
       opp.kanbanType   = opp.type ? String(opp.type).toLowerCase() : null;
 
+      // Airtable percent fields are 0–1 fractions; the UI works in 0–100.
+      opp.probability = opp.probability != null ? Math.round(Number(opp.probability) * 100) : null;
+      // The frontend renders `nextAction` — alias the base's Next Step field.
+      opp.nextAction = opp.nextStep || null;
+
       // Field not present in the live base — kept for frontend compatibility
       opp.driveLink = null;
 
