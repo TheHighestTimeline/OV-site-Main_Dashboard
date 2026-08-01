@@ -3,6 +3,7 @@ import { C, SERIF, SANS, MONO } from '../constants.js';
 import { Eyebrow, Btn, Inp, FR, Toggle } from '../components/UI.jsx';
 import AccountSwitcher from '../components/AccountSwitcher.jsx';
 import { useUser } from '@clerk/clerk-react';
+import { getAirtableHealth } from '../api.js';
 
 // ── Section card wrapper ──────────────────────────────────────────────────────
 function Section({ title, children }) {
@@ -41,6 +42,115 @@ function NotifRow({ label, desc, checked, onChange }) {
       </div>
       <Toggle checked={checked} onChange={onChange} />
     </div>
+  );
+}
+
+// ── Airtable connection doctor (admin) ────────────────────────────────────────
+// The CRM renders an empty table for every kind of Airtable failure, so this is
+// the only place that tells you *why* — bad token, base not granted to the
+// token, or one missing table. Runs on mount so a broken connection is visible
+// without anyone having to know to press a button.
+function AirtableHealth({ showToast }) {
+  const [report,  setReport]  = useState(null);
+  const [error,   setError]   = useState(null);
+  const [busy,    setBusy]    = useState(true);
+
+  const run = async (testWrite = false) => {
+    setBusy(true); setError(null);
+    try {
+      setReport(await getAirtableHealth(testWrite));
+    } catch (e) {
+      setError(e.message);
+      setReport(null);
+    }
+    setBusy(false);
+  };
+  useEffect(() => { run(false); }, []);
+
+  const dot = (ok) => (
+    <span style={{ width: 8, height: 8, borderRadius: '50%', background: ok ? C.grn : C.red, flexShrink: 0, display: 'inline-block' }} />
+  );
+  const mono = { fontFamily: MONO, fontSize: 11, color: C.ink5 };
+
+  const tables = report ? Object.values(report.tables || {}) : [];
+
+  return (
+    <Section title="Airtable connection">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p style={{ fontSize: 13, color: C.ink5, margin: 0, lineHeight: 1.5 }}>
+          Contacts, Tasks, Opportunities, Companies and Activities all read from Airtable.
+          If any of those look empty, run this first — an empty list and a broken
+          connection look identical everywhere else in the app.
+        </p>
+
+        {busy && <div style={{ ...mono }}>Checking…</div>}
+
+        {error && (
+          <div style={{ padding: '10px 14px', background: C.bg, border: `1px solid ${C.red}`, borderRadius: 8, fontSize: 13, color: C.ink8 }}>
+            Health check itself failed: <span style={mono}>{error}</span>
+          </div>
+        )}
+
+        {report && !busy && (
+          <>
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px',
+              background: C.bg, borderRadius: 8,
+              border: `1px solid ${report.ready ? C.grn : C.red}`,
+            }}>
+              <span style={{ marginTop: 4 }}>{dot(report.ready)}</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.ink9 }}>
+                  {report.ready ? 'Connected' : 'Not connected'}
+                </div>
+                <div style={{ fontSize: 12, color: C.ink5, marginTop: 4, lineHeight: 1.5 }}>{report.summary}</div>
+              </div>
+            </div>
+
+            {report.base?.cause && (
+              <div style={{ padding: '10px 14px', background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 8, fontSize: 12, color: C.ink5, lineHeight: 1.55 }}>
+                <strong style={{ color: C.ink9 }}>How to fix:</strong> {report.base.cause}
+              </div>
+            )}
+
+            {tables.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {tables.map(t => (
+                  <div key={t.envVar} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 12px', background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 6 }}>
+                    {dot(t.readable)}
+                    <span style={{ fontSize: 12, color: C.ink8, flex: 1 }}>{t.configured}</span>
+                    <span style={mono}>
+                      {t.readable
+                        ? (t.source === 'env' ? 'ok' : 'ok · default name')
+                        : `HTTP ${t.status}`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {report.writeTest && (
+              <div style={{ padding: '10px 14px', background: C.bg, border: `1px solid ${report.writeTest.ok ? C.grn : C.red}`, borderRadius: 8, fontSize: 12, color: C.ink5, lineHeight: 1.55 }}>
+                <strong style={{ color: C.ink9 }}>Write test:</strong>{' '}
+                {report.writeTest.ok
+                  ? `passed — created and deleted a test record in ${report.writeTest.table}.`
+                  : (report.writeTest.cause || report.writeTest.error)}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Btn v="gho" onClick={() => run(false)}>Re-run check</Btn>
+              <Btn v="gho" onClick={() => run(true)}>Test write access</Btn>
+              <Btn v="gho" onClick={() => {
+                navigator.clipboard?.writeText(JSON.stringify(report, null, 2))
+                  .then(() => showToast('Full report copied ✓'))
+                  .catch(() => showToast('Could not copy'));
+              }}>Copy full report</Btn>
+            </div>
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -118,6 +228,9 @@ export default function Settings({ user, showToast, onLogout, openOv, closeOv, s
             </div>
           </Section>
         )}
+
+        {/* ── Airtable connection doctor (admin) ─────────────────────────── */}
+        {user.isAdmin && <AirtableHealth showToast={showToast} />}
 
         {/* ── Connected Services ─────────────────────────────────────────── */}
         <Section title="Connected Services">

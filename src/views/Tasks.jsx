@@ -106,6 +106,7 @@ export default function Tasks({ user, showToast, openOv, closeOv, setView, compa
   const [projects,  setProjects]  = useState([]);
   const [clients,   setClients]   = useState([]);
   const [loading,   setLoading]   = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [tfAs,      setTfAs]      = useState(initialFilter?.assignee || 'All');
   const [tfPr,      setTfPr]      = useState('All');
   const [tfDeal,    setTfDeal]    = useState('All');
@@ -165,8 +166,10 @@ export default function Tasks({ user, showToast, openOv, closeOv, setView, compa
     const cached = cacheGet('tasks');
     if (cached) { setTasks(cached); setLoading(false); }
     return getTasks()
-      .then(data => { cacheSet('tasks', data); setTasks(data); })
-      .catch(e => showToast('Could not load tasks: ' + e.message))
+      .then(data => { cacheSet('tasks', data); setTasks(data); setLoadError(null); })
+      // A failed fetch used to render an empty board, which is indistinguishable
+      // from "no tasks". Hold the error so the board can say what actually broke.
+      .catch(e => { setLoadError(e.message); showToast('Could not load tasks: ' + e.message); })
       .finally(() => setLoading(false));
   }, [showToast]);
 
@@ -1253,6 +1256,17 @@ export default function Tasks({ user, showToast, openOv, closeOv, setView, compa
 
       {loading ? (
         <SkeletonRows rows={7} />
+      ) : loadError && tasks.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: C.ink5, background: C.bg2, border: `1px solid ${C.red}`, borderRadius: 12 }}>
+          <div style={{ fontSize: 30, marginBottom: 10, color: C.red }}>⚠</div>
+          <p style={{ margin: '0 0 6px', fontSize: 14, color: C.ink9, fontWeight: 600 }}>Couldn't load tasks from Airtable</p>
+          <p style={{ margin: '0 0 14px', fontSize: 12, fontFamily: MONO, color: C.ink3 }}>{loadError}</p>
+          <p style={{ margin: '0 0 14px', fontSize: 12, lineHeight: 1.5 }}>
+            Your Master Action Board is intact — the dashboard just can't reach it.
+            {user?.isAdmin && ' Settings → Airtable connection will tell you which layer is broken.'}
+          </p>
+          <Btn v="gho" onClick={() => { setLoading(true); load(); }}>Retry</Btn>
+        </div>
       ) : (
         // One unified Kanban for both the all-companies view and a company page.
         // Every task lives here, sorted High→Low priority inside each status

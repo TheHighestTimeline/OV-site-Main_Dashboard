@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint src netlify/functions",
     "format": "prettier --write \"src/**/*.{js,jsx}\" \"netlify/functions/**/*.js\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "airtable:doctor": "node scripts/airtable-doctor.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

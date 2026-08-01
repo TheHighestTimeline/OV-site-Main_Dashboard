@@ -52,17 +52,56 @@ In Netlify → Site configuration → Environment variables, add:
 AIRTABLE_TOKEN=patXXXXXXXXXXXXXX.XXXXXXXX...
 AIRTABLE_BASE_ID=appXXXXXXXXXXXXXX
 
-# Table names or IDs (use names if you don't have IDs yet)
+# Optional table overrides. Every function already falls back to the name on
+# the right, so you only need these if a table gets renamed — in which case
+# prefer the tbl… ID, which survives renames.
 AIRTABLE_TABLE_CONTACTS=CRM Contacts
 AIRTABLE_TABLE_TASKS=Master Action Board
 AIRTABLE_TABLE_OPPORTUNITIES=Opportunities
 AIRTABLE_TABLE_COMPANIES=Companies
-AIRTABLE_TABLE_NOTES=Notes
+AIRTABLE_TABLE_ACTIVITIES=Activities
+AIRTABLE_TABLE_PROJECTS=Projects
+AIRTABLE_TABLE_DOCUMENTS=Documents
+AIRTABLE_TABLE_FOLDERS=Folders
 AIRTABLE_TABLE_OUTREACH=Outreach
 AIRTABLE_TABLE_GOALS=Goals
 AIRTABLE_TABLE_FINANCIAL=Financial
 
 ```
+
+There is **no `Notes` table** — contact notes are records in `Activities`
+(see `NOTES_MAP` in `netlify/functions/_airtable.js`). Do not set
+`AIRTABLE_TABLE_NOTES`.
+
+> Netlify only picks up environment-variable changes on a **new deploy**.
+> After editing them, trigger a redeploy or the running site keeps the old values.
+
+---
+
+## 4a. Diagnosing "everything is empty"
+
+Every Airtable failure looks the same in the UI — an empty Contacts table, an
+empty task board. Two tools tell you which layer actually broke:
+
+- **In the app:** Settings → *Airtable connection* (admin only). Runs on open,
+  probes each required table with a live record read, and prints the specific
+  cause plus the fix. "Test write access" round-trips a throwaway record to
+  confirm the token has `data.records:write`.
+- **From a terminal:** `npm run airtable:doctor`. Same checks, no login needed,
+  so you can validate a token *before* pasting it into Netlify:
+  ```
+  AIRTABLE_TOKEN=patXXX AIRTABLE_BASE_ID=appXXX npm run airtable:doctor
+  ```
+
+What the status codes mean:
+
+| Result | Cause | Fix |
+|---|---|---|
+| `401` on everything | Token invalid, revoked, or expired — or still a legacy `key…` API key | Create a new PAT and update `AIRTABLE_TOKEN` |
+| `403` on everything | Token is real but not authorised for this base, or missing a scope | Re-grant the base under **Access** on the token. A token granted at *workspace* level loses the base when the base moves workspaces — which is what a plan upgrade or workspace migration does |
+| `404` on the base | Wrong `AIRTABLE_BASE_ID` | Copy the `app…` segment from the base URL |
+| `404` on one table | That table was renamed or deleted | Fix the name, or pin the `tbl…` ID via the matching env var |
+| All green, app still empty | The deployed site has different env values than the ones you tested | Check Netlify → Environment variables, then redeploy |
 
 ---
 

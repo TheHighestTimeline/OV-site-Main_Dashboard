@@ -15,6 +15,12 @@ export async function getAirtableSchema() {
     return { tables: [] };
   }
 }
+// ── Airtable connection doctor ──────────────────────────────────────────────
+// Admin-only. Reports which layer is broken (token / base grant / table) when
+// the CRM comes back empty. testWrite also round-trips a throwaway record.
+export const getAirtableHealth = (testWrite = false) =>
+  req('airtable-health', { method: 'POST', body: JSON.stringify({ testWrite }) });
+
 // Given a table name (e.g. 'Opportunities') and a record ID, returns the
 // direct Airtable record URL. Falls back to the base if the table isn't found.
 const BASE_ID = 'appgZ4EvfGEI4owb7';

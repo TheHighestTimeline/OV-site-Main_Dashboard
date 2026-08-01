@@ -52,6 +52,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
   const isMobile = useIsMobile();
   const [contacts, setContacts] = useState([]);
   const [loading,  setLoading]  = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [search,   setSearch]   = useState('');
   const [cfSt,     setCfSt]     = useState('All');
   const [cfTy,     setCfTy]     = useState('All');
@@ -94,8 +95,11 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
     const cached = cacheGet('contacts');
     if (cached) { setContacts(cached); setLoading(false); }
     return getContacts()
-      .then(data => { cacheSet('contacts', data); setContacts(data); })
-      .catch(e => showToast('Could not load contacts: ' + e.message))
+      .then(data => { cacheSet('contacts', data); setContacts(data); setLoadError(null); })
+      // A failed fetch used to fall through to the "No contacts yet" empty
+      // state, making an Airtable outage look like an empty CRM. Keep the
+      // toast, but also hold the error so the table can say what broke.
+      .catch(e => { setLoadError(e.message); showToast('Could not load contacts: ' + e.message); })
       .finally(() => setLoading(false));
   }, [showToast]);
   useEffect(() => { loadContacts(); }, [loadContacts]);
@@ -423,6 +427,17 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
       {/* Table */}
       {loading ? (
         <SkeletonRows rows={8} />
+      ) : loadError && contacts.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: C.ink5, background: C.bg2, border: `1px solid ${C.red}`, borderRadius: 12 }}>
+          <div style={{ fontSize: 30, marginBottom: 10, color: C.red }}>⚠</div>
+          <p style={{ margin: '0 0 6px', fontSize: 14, color: C.ink9, fontWeight: 600 }}>Couldn't load contacts from Airtable</p>
+          <p style={{ margin: '0 0 14px', fontSize: 12, fontFamily: MONO, color: C.ink3 }}>{loadError}</p>
+          <p style={{ margin: '0 0 14px', fontSize: 12, lineHeight: 1.5 }}>
+            Your contacts are still in Airtable — the dashboard just can't reach them.
+            {user?.isAdmin && ' Settings → Airtable connection will tell you which layer is broken.'}
+          </p>
+          <Btn v="gho" onClick={() => { setLoading(true); loadContacts(); }}>Retry</Btn>
+        </div>
       ) : filtered.length === 0 ? (
         <div style={{ padding: 48, textAlign: 'center', color: C.ink3, background: C.bg2, borderRadius: 12 }}>
           <div style={{ fontSize: 32, marginBottom: 10, opacity: .3 }}>◉</div>
