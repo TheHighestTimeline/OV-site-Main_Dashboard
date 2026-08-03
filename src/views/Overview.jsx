@@ -4,6 +4,7 @@ import { Tag, Eyebrow } from '../components/UI.jsx';
 import { getTasks, getGoals, getContacts, getOutreach } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import MyDay from './MyDay.jsx';
+import TodayCard from '../components/TodayCard.jsx';
 
 export default function Overview({ user, showToast, setView, openOv, closeOv }) {
   const isMobile = useIsMobile();
@@ -44,6 +45,11 @@ export default function Overview({ user, showToast, setView, openOv, closeOv }) 
           Welcome back, {user.fullName.split(' ')[0]}.
         </h1>
       </div>
+
+      {/* Today (WP9) — the five things committed to for today, capped. Lives
+          here rather than inside Threads because it is the first thing seen
+          each morning and must not need a role check. */}
+      <TodayCard showToast={showToast} setView={setView} />
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(3,1fr)', gap: 12, marginBottom: 22 }}>

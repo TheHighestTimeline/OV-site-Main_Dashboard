@@ -15,6 +15,11 @@ export const ROLES = {
   senior_partner: { label: 'Senior Partner', desc: 'Executive-level access with company scoping' },
   pm:             { label: 'PM',             desc: 'Project Manager — tasks, contacts, drive across assigned companies' },
   read_only:      { label: 'Read Only',      desc: 'View-only — cannot create or modify records' },
+  // Threads tab roles. Both are built now rather than retrofitted later:
+  // adding a capital-entity restriction mid-raise is worse than having it
+  // unused for a while.
+  coo:            { label: 'COO',             desc: 'Threads: every relationship, including capital raise' },
+  ops:            { label: 'Ops',             desc: 'Threads: everything except capital-raise threads' },
 };
 
 // ── Company slugs ─────────────────────────────────────────────────────────────
@@ -174,6 +179,9 @@ export const TAB_ACCESS = {
   settings:     ['admin', 'executive', 'operations', 'sales', 'finance', 'member', 'senior_partner', 'read_only'],
   admin:        ['admin'],
   cost:         ['admin'],
+  // Threads is role-gated to coo/ops. Hiding the nav item hides nothing on its
+  // own — every /api/coo-* endpoint re-checks server-side and returns 403.
+  threads:      ['admin', 'coo', 'ops'],
   // Company-scoped tabs — access checked via canAccess(user, 'company:slug')
   'company:ovmg':        ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   'company:ovm':         ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
@@ -200,7 +208,7 @@ export const ALL_TABS = [
   'contacts', 'tasks', 'outreach', 'social',
   'websites', 'tools', 'booking', 'references',
   'ncnda', 'signature', 'email', 'financial',
-  'team-goals', 'settings', 'admin', 'cost',
+  'team-goals', 'settings', 'admin', 'cost', 'threads',
   // Company tab entries
   'company:ovmg', 'company:ovm', 'company:ovtv', 'company:ovf',
   'company:amplify', 'company:carbonsponge', 'company:ovd', 'company:ovv',
@@ -228,6 +236,7 @@ export const TAB_LABELS = {
   settings:          'Settings',
   admin:             'Admin',
   cost:              'Cost',
+  threads:           'Threads',
   // Company sections
   'company:ovmg':         'OVMG',
   'company:ovm':          'OVM',

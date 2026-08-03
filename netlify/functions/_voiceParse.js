@@ -115,6 +115,81 @@ For an update command, return:
 Parse natural language like "mark it done", "finished that", "push to next week", etc.`;
   }
 
+  // ── threads: capture into the Threads ecosystem (WP10) ─────────────────────
+  // Returns tasks with the links the board actually needs (entity, owner, due
+  // date, opportunity, participation) rather than a bare title. A task missing
+  // entity, owner or due date lands in the Inbox lane instead of on the board,
+  // so the parser is told to leave fields null rather than guess them.
+  //
+  // The client ALWAYS shows a confirm screen before any of this is written.
+  // Entity and owner get guessed wrong often enough that writing blind poisons
+  // the board, and a poisoned board is abandoned within a week.
+  if (section === 'threads') {
+    const participationsJSON = ctx?.participations
+      ? JSON.stringify(ctx.participations.slice(0, 150).map(p => ({
+          id: p.id, contact: p.contactName, workstream: p.workstreamName,
+          stage: p.stageLabel, entity: p.entity,
+        })))
+      : '[]';
+    const workstreamsJSON = ctx?.workstreams
+      ? JSON.stringify(ctx.workstreams.slice(0, 100).map(w => ({ id: w.id, name: w.name, entity: w.entity })))
+      : '[]';
+
+    return `You are parsing a spoken update from the COO of OneVibe Media Group into structured
+actions for the Threads tab. Today is ${today}.
+
+Active tasks (JSON): ${tasksJSON}
+Known contacts (JSON): ${contactsJSON}
+Participations, meaning one person inside one workstream (JSON): ${participationsJSON}
+Workstreams (JSON): ${workstreamsJSON}
+
+Return a JSON object with this exact shape. Never omit a key; use empty arrays and nulls.
+{
+  "summary": "one sentence on what was said",
+  "newTasks": [
+    {
+      "actionName": "<concrete action, imperative>",
+      "entity": "<entity name from the lists above, or null>",
+      "owner": "<person's name if one was named, or null>",
+      "dueDate": "YYYY-MM-DD or null",
+      "priority": "High|Medium|Low",
+      "opportunityId": "<workstream id from the list, or null>",
+      "participationId": "<participation id from the list, or null>",
+      "contactId": "<contact id from the list, or null>",
+      "confidence": 0.0-1.0
+    }
+  ],
+  "taskUpdates": [
+    { "taskId": "<id from active tasks, or null>", "taskTitle": "<matched name>",
+      "newStatus": "<Done|In Progress|Not Started|On Hold|Waiting On Response|Needs Attention|Submitted|Canceled|null>",
+      "note": "<what was said>", "confidence": 0.0-1.0 }
+  ],
+  "focusRequests": [
+    { "taskId": "<id from active tasks, or null>", "taskTitle": "<matched name>",
+      "focus": "Doing Now|Next Up", "confidence": 0.0-1.0 }
+  ],
+  "stageChanges": [
+    { "participationId": "<id from participations>", "toStage": "<stage name>",
+      "note": "<what was said>", "confidence": 0.0-1.0 }
+  ],
+  "notes": [
+    { "participationId": "<id or null>", "contactId": "<id or null>", "text": "<the note>" }
+  ]
+}
+
+RULES:
+- NEVER invent an id. If you cannot match confidently against the lists above, use null.
+  A null lands the item in a review lane, which is recoverable. A wrong id is not.
+- Leave entity, owner or dueDate null when they were not actually said. Do not infer an
+  entity from the topic. Tasks missing those fields go to an Inbox lane on purpose.
+- "put X on today's list" or "I'm doing X today" is a focusRequest with focus "Doing Now",
+  not a new task, when X matches an existing task.
+- Convert relative dates to absolute YYYY-MM-DD based on today.
+- Stage names must come from this list: Initial Outreach, NCNDA Sent, NCNDA Signed,
+  Discovery Call, Contract Negotiation, Deal Finalization, Closed, Stalled, Archived.
+- Do not use em dashes.`;
+  }
+
   if (section === 'new-contact') {
     return `You are an AI assistant parsing a voice command to add a new contact to a CRM.
 Return:

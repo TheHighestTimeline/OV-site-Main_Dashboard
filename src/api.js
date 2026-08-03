@@ -57,10 +57,25 @@ async function req(path, opts = {}) {
     clearTimeout(timer);
   }
   if (!res.ok) {
-    let msg = await res.text().catch(() => res.statusText);
+    const raw = await res.text().catch(() => res.statusText);
+    let msg  = raw;
+    let body = null;
     // Server errors arrive as {"error": "..."} — unwrap for readable toasts.
-    try { const j = JSON.parse(msg); if (j.error) msg = typeof j.error === 'string' ? j.error : JSON.stringify(j.error); } catch {}
-    throw new Error(msg || `HTTP ${res.status}`);
+    try {
+      body = JSON.parse(raw);
+      if (body?.error) msg = typeof body.error === 'string' ? body.error : JSON.stringify(body.error);
+    } catch { /* not JSON; keep the raw text */ }
+
+    const e = new Error(msg || `HTTP ${res.status}`);
+    // Some endpoints refuse deliberately and hand back what the UI needs to
+    // recover: the Today card's swap prompt (FOCUS_FULL) and the stage
+    // evidence gate (EVIDENCE_REQUIRED) both arrive as a 409 with a payload.
+    // Flattening those to a bare message would turn a designed interaction
+    // into a dead-end toast.
+    e.status = res.status;
+    e.code   = body?.code || null;
+    e.body   = body;
+    throw e;
   }
   return res.json();
 }
@@ -304,3 +319,64 @@ export const upsertClientPlatform = (data) => req('client-platforms-upsert', { m
 export const listAds  = (clientId) => req(`ads-list?clientId=${clientId}`);
 export const upsertAd = (data) => req('ads-upsert', { method: 'POST', body: JSON.stringify(data) });
 export const deleteAd = (id) => req('ads-delete', { method: 'POST', body: JSON.stringify({ id }) });
+
+// ── Threads tab (WP2 through WP11) ──────────────────────────────────────────
+// One read backs the whole tab: programs, workstreams, participations, contacts.
+// Split reads would fan out into an N+1 straight through Airtable's 5 req/sec
+// ceiling, so the server joins once and the client derives all three views.
+export const getThreadsData = () => req('coo-threads-data');
+
+// Participations — one contact inside one workstream. Carries the stage.
+export const upsertParticipation = (data) =>
+  req('coo-participation-upsert', { method: 'POST', body: JSON.stringify(data) });
+
+// Stage moves go through here, never through a plain field write, because this
+// is where the evidence gate lives. A 409 with code EVIDENCE_REQUIRED means the
+// transition was refused, not that it failed.
+export const advanceStage = (data) =>
+  req('coo-stage-advance', { method: 'POST', body: JSON.stringify(data) });
+
+// Timeline
+export const getCooEvents = (scope) => {
+  const qs = new URLSearchParams(scope).toString();
+  return req(`coo-events-list?${qs}`);
+};
+export const createCooNote = (data) =>
+  req('coo-note-create', { method: 'POST', body: JSON.stringify(data) });
+
+// Triage buckets
+export const getTriage = () => req('coo-triage');
+
+// The brief. GET returns cache (flagged when stale); POST regenerates.
+export const getBrief       = (participationId) => req(`coo-brief-generate?participationId=${encodeURIComponent(participationId)}`);
+export const regenerateBrief = (participationId) =>
+  req('coo-brief-generate', { method: 'POST', body: JSON.stringify({ participationId, force: true }) }, );
+
+// Signals — the Resolved? queue. Inferred signals propose; humans dispose.
+export const getSignals    = (status = 'pending') => req(`coo-signals?status=${encodeURIComponent(status)}`);
+export const resolveSignal = (id, decision, note) =>
+  req('coo-signals', { method: 'POST', body: JSON.stringify({ id, decision, note }) });
+
+// Unmatched identities queue + manual merge
+export const getIdentities = (status = 'unmatched') => req(`coo-identities?status=${encodeURIComponent(status)}`);
+export const linkIdentity  = (data) => req('coo-identities', { method: 'POST', body: JSON.stringify(data) });
+
+// Delegation and the referral tree
+export const delegateTask     = (data) => req('coo-delegate', { method: 'POST', body: JSON.stringify(data) });
+export const getAccountability = (view = 'both') => req(`coo-accountability?view=${encodeURIComponent(view)}`);
+
+// Voice capture into the Threads ecosystem. Always review before applying.
+export const applyVoiceActions = (data) =>
+  req('coo-voice-apply', { method: 'POST', body: JSON.stringify(data) });
+
+// Manual scan triggers (also run on a schedule)
+export const scanDrive       = () => req('coo-signals-scan-drive',  { method: 'POST', body: '{}' });
+export const scanGmailSignals = () => req('coo-signals-scan-gmail', { method: 'POST', body: '{}' });
+export const ingestGmail     = () => req('coo-ingest-gmail',        { method: 'POST', body: '{}' });
+
+// ── Today list (WP9) — Focus is a field on Master Action Board ──────────────
+// A 409 with code FOCUS_FULL is the swap prompt, not an error to swallow.
+export const getFocus   = ()                   => req('tasks-focus');
+export const setFocus   = (taskId, focus, swapOutTaskId) =>
+  req('tasks-focus', { method: 'POST', body: JSON.stringify({ taskId, focus, swapOutTaskId }) });
+export const reorderFocus = (order)            => req('tasks-focus', { method: 'POST', body: JSON.stringify({ order }) });

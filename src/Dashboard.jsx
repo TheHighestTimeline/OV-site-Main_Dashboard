@@ -39,6 +39,7 @@ const CostDashboard = lazy(() => import('./views/CostDashboard.jsx'));
 const AudioDump     = lazy(() => import('./views/AudioDump.jsx'));
 const CompanyView   = lazy(() => import('./views/CompanyView.jsx'));
 const Review        = lazy(() => import('./views/Review.jsx'));
+const Threads       = lazy(() => import('./views/Threads.jsx'));
 
 // ── URL ↔ view sync (§10: refresh stays on the current route) ─────────────────
 // The app routes off a single `view` string (e.g. 'tasks', 'company:ovm:tasks').
@@ -61,6 +62,14 @@ function parseHashView() {
   return '';
 }
 
+// Does the user hold at least one of these roles? Admins always pass, matching
+// requireRole() on the server so the nav and the API never disagree.
+function hasAnyRole(user, roles) {
+  if (!user) return false;
+  if (user.isAdmin) return true;
+  return (user.roles || []).some(r => roles.includes(r));
+}
+
 // ── Access denied splash ──────────────────────────────────────────────────────
 function AccessDenied() {
   return (
@@ -80,6 +89,11 @@ const NAV_META = [
   { id: 'review',     icon: '☑', label: 'Review'     },
   { id: 'audio-dump', icon: '◎', label: 'Audio Dump', adminOnly: true },
   { id: 'contacts',   icon: '◉', label: 'Contacts'   },
+  // Threads is gated on the coo/ops roles specifically, NOT on canAccess. Every
+  // other tab lets any @onevibemediagroup.com address through, but the
+  // coo-* endpoints do not, so using canAccess here would show the tab to
+  // people who then get a 403 from every request it makes.
+  { id: 'threads',    icon: '◈', label: 'Threads', rolesAny: ['coo', 'ops'] },
   { id: 'tasks',      icon: '▤', label: 'Tasks'      },
   { id: 'tools',      icon: '⚒', label: 'Tools'      },
   { id: 'references', icon: '⊞', label: 'References' },
@@ -115,6 +129,7 @@ export default function Dashboard({ user, onLogout }) {
   // Filter top-level nav to items the user can access
   const NAV_ITEMS = NAV_META.filter(item => {
     if (item.adminOnly && !user.isAdmin) return false;
+    if (item.rolesAny && !hasAnyRole(user, item.rolesAny)) return false;
     return canAccess(user, item.id);
   });
 
@@ -187,7 +202,8 @@ export default function Dashboard({ user, onLogout }) {
 
   // ── ⌘K + g-shortcuts (2026-07 UI pass) ─────────────────────────────────────
   // Press g then a letter to jump: g o Overview · g t Tasks · g k Kanban ·
-  // g c Contacts · g r Review · g m My Day. Ignored while typing in a field.
+  // g c Contacts · g r Review · g m My Day · g h Threads. Ignored while typing
+  // in a field. ('h' because g t is already Tasks.)
   // NOTE: must stay BELOW the setView declaration above (TDZ crash otherwise).
   useEffect(() => {
     let goArmed = 0; // timestamp when 'g' was pressed
@@ -195,7 +211,7 @@ export default function Dashboard({ user, onLogout }) {
       const el = document.activeElement;
       return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
     };
-    const GO = { o: 'overview', t: 'tasks', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day' };
+    const GO = { o: 'overview', t: 'tasks', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day', h: 'threads' };
     const onKey = e => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -246,6 +262,7 @@ export default function Dashboard({ user, onLogout }) {
       'overview':   gateView('overview',   <Overview   {...ctx} />),
       'my-day':     gateView('my-day',     <MyDay      {...ctx} />),
       'review':     gateView('review',     <Review     {...ctx} />),
+      'threads':    hasAnyRole(user, ['coo', 'ops']) ? <Threads {...ctx} /> : <AccessDenied />,
       'audio-dump': user.isAdmin ? <AudioDump {...ctx} /> : <AccessDenied />,
       // §3.1: the global company scope filters every scoped view below.
       'contacts':   gateView('contacts',   <Contacts   {...ctx} companyFilter={scope} initialParams={view === 'contacts' ? viewParams : null} />),

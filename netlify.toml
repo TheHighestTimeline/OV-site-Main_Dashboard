@@ -43,6 +43,35 @@
 [functions."weekly-report"]
   schedule = "0 12 * * 5"
 
+# ── Threads tab scheduled jobs (WP3, WP5, WP6, WP11) ─────────────────────────
+# All of these are ALSO callable over HTTP from the Threads > Queues view for a
+# manual run. They gate on the coo role there; scheduled invocations carry no
+# httpMethod and skip the gate, which is why each one checks for it explicitly.
+#
+# coo-signals-scan-drive: the deterministic detector. Diffs each data room's
+# Drive permission list against the last snapshot. First run on a folder seeds a
+# baseline and fires nothing, so the existing access list does not arrive as a
+# wave of false grants.
+[functions."coo-signals-scan-drive"]
+  schedule = "*/15 * * * *"
+
+# coo-ingest-gmail: normalizes Tanner's mail into coo_threads / coo_messages and
+# writes one Activity row per thread per day. Not accounts@, not socials@.
+[functions."coo-ingest-gmail"]
+  schedule = "*/20 * * * *"
+
+# coo-signals-scan-gmail: the INFERRED detectors (eSignature completion,
+# outbound attachments, access-request mail). These only ever propose; they land
+# in the Resolved? queue and change nothing until a human confirms.
+[functions."coo-signals-scan-gmail"]
+  schedule = "0 */2 * * *"
+
+# coo-stalled-scan: 21 days with nothing recorded moves a participation to
+# Stalled, and activity on a stalled row returns it to its prior stage.
+# Daily at 6am ET (10:00 UTC), before the morning routine.
+[functions."coo-stalled-scan"]
+  schedule = "0 10 * * *"
+
 # ── Security headers — Phase 7 audit fix M-10 ───────────────────────────────
 # Content-Security-Policy + standard hardening headers applied to every
 # response. The CSP allows the dashboard to:
