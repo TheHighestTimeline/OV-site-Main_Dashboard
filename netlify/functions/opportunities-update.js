@@ -21,8 +21,8 @@ export const handler = async (event) => {
   try { body = JSON.parse(event.body || '{}'); } catch { return err(400, 'Invalid JSON'); }
 
   const { id, name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
-          nextStep, dataRoom, priority, kind, otherParty, probability,
-          companyIds, contactIds, projectIds } = body;
+          nextStep, dataRoom, priority, kind, otherParty, probability, goal,
+          companyIds, contactIds, projectIds, parentId } = body;
   if (!id) return err(400, 'id is required');
 
   try {
@@ -38,6 +38,7 @@ export const handler = async (event) => {
     if (priority  !== undefined) update.priority  = priority || null;
     if (kind      !== undefined) update.kind      = kind || null;
     if (otherParty !== undefined) update.otherParty = otherParty;
+    if (goal      !== undefined) update.goal      = goal;
     // Airtable percent fields store a 0–1 fraction; the UI works in 0–100.
     if (probability !== undefined) update.probability = probability != null && probability !== '' ? Number(probability) / 100 : null;
     const t = normType(type, kanbanType);
@@ -48,6 +49,12 @@ export const handler = async (event) => {
     if (companyIds !== undefined) fields['Companies']          = Array.isArray(companyIds) ? companyIds : [];
     if (contactIds !== undefined) fields['Associated Contact'] = Array.isArray(contactIds) ? contactIds : [];
     if (projectIds !== undefined) fields['Projects']           = Array.isArray(projectIds) ? projectIds : [];
+    // Self-link. Empty = this opportunity is a Program (umbrella); set = it is a
+    // Workstream nested under one. Passing null/'' promotes it back to a Program.
+    if (parentId !== undefined) {
+      if (parentId === id) return err(400, 'An opportunity cannot be its own parent.');
+      fields['Parent Opportunity'] = parentId ? [parentId] : [];
+    }
 
     if (Object.keys(fields).length === 0) return ok({ id, updated: false });
     await airtableUpdate(TABLE(), id, fields);

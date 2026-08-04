@@ -524,3 +524,74 @@ against the live database destroys everything in those tables.
 
 Both files listed above are `create table if not exists` throughout and are
 genuinely safe to run and re-run.
+
+---
+
+## 16. Why the tab was empty after the env var was set (2026-08-04)
+
+`AIRTABLE_TB_PARTICIPATIONS` was set correctly and the Participations table was
+fully provisioned. The tab was still empty, for two reasons that had nothing to
+do with the environment.
+
+### 16a. Every Opportunity was a program, so nothing was selectable
+
+The rail is built from `Parent Opportunity`: empty = Program, set = Workstream.
+All 40 Opportunities in the base had it empty. So the rail rendered 40 programs,
+each of which expanded to *"No workstreams yet"* — no digest, no cards, nothing
+to click, and nowhere a participation could go.
+
+`coo-threads-data.js` now demotes a childless program to a workstream:
+
+```js
+const hasChildren = new Set(opps.map(o => o.parentId).filter(Boolean));
+o.isProgram = o.isProgram && hasChildren.has(o.id);
+```
+
+A top-level opportunity with nothing nested under it is not an umbrella over
+anything, it *is* the work, so it carries participations directly. Nesting still
+works exactly as before the moment anything sets `Parent Opportunity` — that
+record becomes a program again and its children appear under it. This is what
+makes a flat base usable without a migration.
+
+The rail also stops labelling everything "Unparented" when there are no programs
+at all; with a flat base the header reads "Workstreams".
+
+### 16b. There was no way to create a participation
+
+`coo-participation-upsert.js` shipped, and `upsertParticipation()` was bound in
+`src/api.js`, but nothing in the UI ever called it. A participation is the only
+record that carries a relationship stage, so with none in the base every view in
+the tab is an empty state by construction. It looked like a broken deploy.
+
+`src/views/threads/AddParticipant.jsx` is the missing form. It is reachable from
+two places in the Opportunities view: the workstream digest header, and the
+"No participants yet" empty state.
+
+### 16c. The Goal gate is now satisfiable without leaving the app
+
+The sprawl rule stands — the server still refuses a participation on a workstream
+with no Goal. But no Opportunity in the base had a Goal, so the rule was
+unsatisfiable from the UI and every attempt would have been refused.
+
+The create path now accepts an optional `goal` alongside the first participation
+and writes it to the workstream in the same request. The form asks for it only
+when the workstream has none, and marks it required. `opportunities-update.js`
+also accepts `goal` and `parentId` now, so nesting and goals can be set from the
+app rather than only in Airtable.
+
+### 16d. Empty string on a singleSelect
+
+`entity` fell back to `''` when a workstream had no Entity. Airtable does not
+read `''` as blank on a singleSelect — it reads it as a request to create a new
+option named `""` and fails the entire write. `createParticipation()` now strips
+empty strings from `Stage`, `Waiting On`, `Entity` and `Status`, and the upsert
+sends `null` rather than `''`.
+
+### What still has to happen by hand
+
+Nothing, to get the first card on the board. Open Threads → Opportunities, pick
+any workstream in the rail, click **Add participant**, give the workstream a goal
+and pick the person. The Supabase-backed surfaces (timeline, notes, briefs,
+queues) stay dark until `migrations/0002_coo_threads_schema.sql` is run — see
+section 15 — but the board, stages, triage and delegation all work off Airtable
+alone.

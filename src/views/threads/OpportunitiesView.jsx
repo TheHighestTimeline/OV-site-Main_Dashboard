@@ -11,11 +11,19 @@
 
 import { useState, useMemo } from 'react';
 import { C, SERIF, SANS, MONO } from '../../constants.js';
+import { Modal } from '../../components/UI.jsx';
 import {
   StageBadge, EntityChip, WorkstreamChip, WaitingPill, UrgencyDot, urgencyOf,
   Panel, Empty, fmtRel,
 } from './shared.jsx';
 import DetailPane from './DetailPane.jsx';
+import AddParticipant from './AddParticipant.jsx';
+
+const addBtn = {
+  padding: '7px 14px', borderRadius: 999, border: 'none', background: C.acc,
+  color: '#fff', fontFamily: MONO, fontSize: 10, letterSpacing: '.05em',
+  fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+};
 
 export default function OpportunitiesView({
   data, selected, onSelect, onChanged, showToast, isMobile,
@@ -23,6 +31,7 @@ export default function OpportunitiesView({
   const { programs = [], workstreams = [], participations = [], contacts = [] } = data || {};
   const [openPrograms, setOpenPrograms] = useState(() => new Set(programs.slice(0, 2).map(p => p.id)));
   const [activeWorkstream, setActiveWorkstream] = useState(null);
+  const [adding, setAdding] = useState(false);
 
   // Workstreams whose parent program is missing or unset still need a home, or
   // they silently vanish from the only view that lists them.
@@ -49,6 +58,19 @@ export default function OpportunitiesView({
     });
   }
 
+  const addModal = adding && ws && (
+    <Modal title={`Add someone to ${ws.name}`} onClose={() => setAdding(false)}>
+      <AddParticipant
+        workstream={ws}
+        contacts={contacts}
+        takenContactIds={members.map(m => m.contactId).filter(Boolean)}
+        onClose={() => setAdding(false)}
+        onDone={onChanged}
+        showToast={showToast}
+      />
+    </Modal>
+  );
+
   // ── Mobile: a three-level drill-down stack ─────────────────────────────────
   if (isMobile) {
     if (selectedP) {
@@ -63,8 +85,9 @@ export default function OpportunitiesView({
       return (
         <div>
           <BackButton label={ws.name} onClick={() => setActiveWorkstream(null)} />
-          <WorkstreamDigest workstream={ws} />
-          <CardList members={members} onSelect={onSelect} />
+          <WorkstreamDigest workstream={ws} onAdd={() => setAdding(true)} />
+          <CardList members={members} onSelect={onSelect} onAdd={() => setAdding(true)} />
+          {addModal}
         </div>
       );
     }
@@ -100,8 +123,8 @@ export default function OpportunitiesView({
         )}
         {ws && (
           <>
-            <WorkstreamDigest workstream={ws} />
-            <CardList members={members} selected={selected} onSelect={onSelect} />
+            <WorkstreamDigest workstream={ws} onAdd={() => setAdding(true)} />
+            <CardList members={members} selected={selected} onSelect={onSelect} onAdd={() => setAdding(true)} />
           </>
         )}
       </div>
@@ -114,6 +137,8 @@ export default function OpportunitiesView({
           />
         </Panel>
       </div>
+
+      {addModal}
     </div>
   );
 }
@@ -174,11 +199,15 @@ function Rail({ programs, workstreams, orphans, participations, openPrograms, to
       })}
 
       {orphans.length > 0 && (
-        <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${C.cr2}` }}>
+        <div style={{ marginTop: programs.length ? 8 : 0, paddingTop: programs.length ? 8 : 0, borderTop: programs.length ? `1px solid ${C.cr2}` : 'none' }}>
           <div style={{
             fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase',
             color: C.ink3, padding: '0 8px 5px',
-          }}>Unparented</div>
+          }}>
+            {/* With no programs at all the base is flat, and calling every row
+                "Unparented" reads as a fault rather than the normal shape. */}
+            {programs.length ? 'Standalone' : 'Workstreams'}
+          </div>
           {orphans.map(w => (
             <RailItem key={w.id} ws={w} counts={countsFor(w.id)} active={active === w.id} onPick={onPick} />
           ))}
@@ -211,7 +240,7 @@ function RailItem({ ws, counts, active, onPick, indent }) {
 
 // ── Workstream digest ────────────────────────────────────────────────────────
 
-function WorkstreamDigest({ workstream: w }) {
+function WorkstreamDigest({ workstream: w, onAdd }) {
   const stageEntries = Object.entries(w.stageCounts || {});
   return (
     <Panel sx={{ marginBottom: 12 }}>
@@ -222,7 +251,10 @@ function WorkstreamDigest({ workstream: w }) {
           </h3>
           {w.goal && <p style={{ fontSize: 12.5, color: C.ink3, margin: '4px 0 0', lineHeight: 1.5 }}>{w.goal}</p>}
         </div>
-        <EntityChip entity={w.entity} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <EntityChip entity={w.entity} />
+          {onAdd && <button onClick={onAdd} style={addBtn}>＋ Add participant</button>}
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
@@ -251,7 +283,8 @@ function WorkstreamDigest({ workstream: w }) {
           background: C.yelS, color: C.yel, fontSize: 11.5, lineHeight: 1.5,
         }}>
           No Goal set. A workstream needs its own goal and its own counterparties,
-          otherwise it belongs on the board as a task.
+          otherwise it belongs on the board as a task. Add participant will ask for
+          the goal and save it with the first person.
         </div>
       )}
     </Panel>
@@ -275,13 +308,14 @@ function Stat({ label, value, alert }) {
 
 // ── Participation cards ──────────────────────────────────────────────────────
 
-function CardList({ members, selected, onSelect }) {
+function CardList({ members, selected, onSelect, onAdd }) {
   if (!members.length) {
     return (
       <Empty
         icon="◉"
         title="No participants yet"
         body="A participation is one contact inside this workstream. It carries their stage, which is why the same person can sit at different stages in two workstreams at once."
+        action={onAdd && <button onClick={onAdd} style={addBtn}>＋ Add the first participant</button>}
       />
     );
   }

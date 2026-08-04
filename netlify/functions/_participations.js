@@ -116,6 +116,12 @@ export async function createParticipation(data) {
     status:       data.status || 'Active',
   }, PARTICIPATIONS_MAP);
 
+  // An empty string on a singleSelect is not "blank" to Airtable, it is a
+  // request to create a new option named "", which fails the whole write.
+  for (const f of ['Stage', 'Waiting On', 'Entity', 'Status']) {
+    if (fields[f] === '') delete fields[f];
+  }
+
   const [rec] = await createRecords(table, [{ fields }]);
   return toParticipation(rec);
 }

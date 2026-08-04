@@ -15,10 +15,10 @@ import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps } from './_cooAccess.js';
 import { getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
-import { TB, getRecord, listRecords, fromAirtableRecord, CONTACTS_MAP, OPPORTUNITIES_MAP } from './_airtable.js';
+import { TB, getRecord, listRecords, airtableUpdate, fromAirtableRecord, CONTACTS_MAP, OPPORTUNITIES_MAP } from './_airtable.js';
 import {
   createParticipation, updateParticipation, getParticipation,
-  participationsConfigured, participationName, NOT_CONFIGURED_MSG,
+  participationsConfigured, participationName, PARTICIPATIONS_TABLE, NOT_CONFIGURED_MSG,
 } from './_participations.js';
 import { LABEL_TO_ID, ID_TO_LABEL, isValidStage, defaultStage, inferLifecycle } from './_stages.js';
 
@@ -40,7 +40,7 @@ export const handler = async (event) => {
     const {
       id, contactId, workstreamId, stage,
       owner, waitingOn, nextAction, nextActionDate,
-      blockingItem, entity, status, notes,
+      blockingItem, entity, status, notes, goal,
     } = body;
 
     // ── Update path ──────────────────────────────────────────────────────────
@@ -82,10 +82,20 @@ export const handler = async (event) => {
 
     const contact    = fromAirtableRecord(contactRec, CONTACTS_MAP);
     const workstream = fromAirtableRecord(workstreamRec, OPPORTUNITIES_MAP);
-    const goal       = workstreamRec.fields?.['Goal'] || '';
 
     // Sprawl rule. A workstream with no goal is a task wearing a costume.
-    if (!goal.trim()) {
+    //
+    // The rule stands, but it is satisfiable in one step: the caller may send
+    // the goal alongside the first participation and it is written to the
+    // workstream before the participation is created. Refusing outright and
+    // sending the user to Airtable is what made every workstream in a fresh
+    // base unusable, since none of them carry a Goal until someone writes one.
+    let effectiveGoal = String(workstreamRec.fields?.['Goal'] || '').trim();
+    if (!effectiveGoal && String(goal || '').trim()) {
+      effectiveGoal = String(goal).trim();
+      await airtableUpdate(OPPS_TBL(), workstreamId, { Goal: effectiveGoal });
+    }
+    if (!effectiveGoal) {
       return err(400,
         `"${workstream.name}" has no Goal set. A workstream needs its own goal and its own ` +
         'counterparties, otherwise it belongs on the board as a task. Set the Goal first.');
@@ -93,7 +103,7 @@ export const handler = async (event) => {
 
     // Refuse a duplicate pairing rather than creating a second stage for the
     // same person on the same workstream, which would make both wrong.
-    const existingAll = await listRecords(process.env.AIRTABLE_TB_PARTICIPATIONS, {
+    const existingAll = await listRecords(PARTICIPATIONS_TABLE(), {
       fields: ['Contact', 'Workstream'],
     }).catch(() => []);
     const dupe = existingAll.find(r => {
@@ -121,7 +131,10 @@ export const handler = async (event) => {
       nextAction:     nextAction || '',
       nextActionDate: nextActionDate || null,
       blockingItem:   blockingItem || '',
-      entity:         entity || workstream.entity || '',
+      // null, never ''. Airtable rejects an empty string on a singleSelect with
+      // "insufficient permissions to create new select option", which would fail
+      // the whole create for any workstream that has no Entity set.
+      entity:         entity || workstream.entity || null,
       status:         status || 'Active',
       notes:          notes || '',
     });

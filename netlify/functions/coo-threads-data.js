@@ -112,7 +112,20 @@ export const handler = async (event) => {
       };
     }).filter(keep);
 
-    const oppById     = Object.fromEntries(opps.map(o => [o.id, o]));
+    const oppById = Object.fromEntries(opps.map(o => [o.id, o]));
+
+    // A top-level opportunity with NO children is not an umbrella over anything;
+    // it is the work itself. Classifying it as a program made it a dead end in
+    // the rail — expandable, empty, and impossible to add anyone to. So a
+    // program only counts as a program once something is nested under it, and
+    // everything else is a workstream that can carry participations directly.
+    // This is what lets a flat base (no Parent Opportunity anywhere) work at all.
+    const hasChildren = new Set(opps.map(o => o.parentId).filter(Boolean));
+    for (const o of opps) {
+      o.isProgram = o.isProgram && hasChildren.has(o.id);
+      o.standalone = !o.parentId && !hasChildren.has(o.id);
+    }
+
     const programs    = opps.filter(o => o.isProgram);
     const workstreams = opps.filter(o => !o.isProgram);
 

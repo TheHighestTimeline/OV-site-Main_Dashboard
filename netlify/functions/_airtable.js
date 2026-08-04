@@ -457,6 +457,7 @@ export const OPPORTUNITIES_MAP = {
   priority:    'Priority',  // singleSelect High/Medium/Low (added 2026-07-16)
   kind:        'Kind',      // singleSelect Deal/Workstream (added 2026-07-16)
   otherParty:  'Other Party',
+  goal:        'Goal',      // load-bearing: no Goal = no participations (sprawl rule)
 };
 
 export const OUTREACH_MAP = {
