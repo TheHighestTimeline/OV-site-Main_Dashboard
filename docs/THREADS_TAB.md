@@ -633,3 +633,54 @@ keeps the roster from drowning the working set once the tracked list grows.
 `AddParticipant` now serves both directions. From Opportunities the workstream is
 fixed and you pick the person; from People the person is fixed and you pick the
 workstream. Whichever side is fixed renders as a header instead of a picker.
+
+---
+
+## 18. Suggested links: backfilling participations from the CRM (2026-08-04)
+
+Section 17 concluded the contact↔opportunity graph could not be seeded. That was
+right about the *link fields* and wrong about the base as a whole. The signal is
+in the **names**: a contact's counterparty company is "BrightSunSolr" and the
+deal is called "BrightSunSolr JV / Blaze Merger". `coo-participation-suggest.js`
+matches on that.
+
+### Sources checked and rejected
+
+| Source | Why rejected |
+|---|---|
+| `Opportunities.Companies` | Records which OneVibe entity OWNS the deal, not the counterparty. 10 of 11 point at OneVibeMediaGroup. Joining through it pairs all 13 internal staff with all 8 OVMG deals — ~104 records asserting your own team is on the other side of your own raises. |
+| `Master Action Board` Contact + Opportunity | All 14 pairs are Tanner South and Carsten Gauslow against OVMG deals. Owners, not counterparties. |
+| `CRM Contacts.Opportunities` | Empty on all 114. |
+| `Documents` Contact + Deal | Empty on all 51. |
+
+### The rule that is used
+
+A contact's **external** company name against an opportunity name, two ways:
+
+1. The whole normalised company name appears in the deal name — catches `808 Amp`
+   in "808 Amp JV" and `Pro Performance` in "Pro Performance - Website", where no
+   single token is distinctive enough to trust on its own.
+2. A token of four or more characters that is not in the `NOISE` list appears —
+   catches `genesis` in "Genesis 'Box' Program".
+
+`NOISE` holds both corporate filler (`llc`, `group`, `capital`, `solutions`) and
+ordinary English that shows up in company names (`family`, `office`, `world`,
+`energy`). That second half is load-bearing: without `family`, "Miho Family
+Offices" matches "Friends & Family Tier" — a plausible-looking link between two
+unrelated things, which is the exact failure this feature must not produce.
+
+Internal companies are excluded via `Type = Internal`, a non-empty `Entity Code`,
+or a name starting `OneVibe`/`OVMG` (two legacy records carry neither flag).
+
+### Nothing writes without a tick
+
+GET returns proposals and writes nothing. POST writes only the rows the user
+ticked, grouped by workstream so the required Goal is asked for once per group
+rather than once per person. Every row shows its match reason on screen — a
+proposal you cannot check is a write with extra steps.
+
+Against the base as of 2026-08-04 this produces **13 proposals across 9
+workstreams**, all correct on inspection: five BrightSunSolr people onto the JV,
+Mark Bedore onto four Everything Rave workstreams, plus Genesis, 808 Amp,
+Sustopia and Pro Performance. The button is in the Threads header and hides
+itself once 25 participations exist, since it is an onboarding tool.

@@ -330,6 +330,12 @@ export const getThreadsData = () => req('coo-threads-data');
 export const upsertParticipation = (data) =>
   req('coo-participation-upsert', { method: 'POST', body: JSON.stringify(data) });
 
+// Proposed links, matched from the CRM's own company names. GET writes nothing;
+// POST writes only what the user ticked. Inferences propose, they never apply.
+export const getParticipationSuggestions = () => req('coo-participation-suggest');
+export const applyParticipationSuggestions = (groups) =>
+  req('coo-participation-suggest', { method: 'POST', body: JSON.stringify({ groups }) });
+
 // Stage moves go through here, never through a plain field write, because this
 // is where the evidence gate lives. A 409 with code EVIDENCE_REQUIRED means the
 // transition was refused, not that it failed.

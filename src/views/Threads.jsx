@@ -24,6 +24,7 @@ import QueuesView        from './threads/QueuesView.jsx';
 import PipelineView      from './threads/PipelineView.jsx';
 import AccountabilityView from './threads/AccountabilityView.jsx';
 import VoiceCapture      from './threads/VoiceCapture.jsx';
+import SuggestLinks      from './threads/SuggestLinks.jsx';
 
 const retryBtn = {
   padding: '7px 14px', borderRadius: 7, border: `1px solid ${C.cr3}`,
@@ -54,6 +55,7 @@ export default function Threads({ user, showToast }) {
   const [error,    setError]    = useState(null);
   const [selected, setSelected] = useState(null);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const [badges,   setBadges]   = useState({ signals: 0, identities: 0 });
 
   const load = useCallback(async () => {
@@ -109,7 +111,16 @@ export default function Threads({ user, showToast }) {
           }}>Threads</h1>
         </div>
 
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Only useful while the board is still being populated, so it stays
+              out of the way once most relationships are already tracked. */}
+          {data?.configured && (data.participations?.length || 0) < 25 && (
+            <button onClick={() => setSuggestOpen(true)} style={{
+              padding: '7px 13px', borderRadius: 999, border: `1px solid ${C.acc}`,
+              background: 'transparent', color: C.acc, fontFamily: MONO, fontSize: 10,
+              letterSpacing: '.05em', fontWeight: 600, cursor: 'pointer',
+            }}>⌁ Suggest links</button>
+          )}
           <button onClick={() => setVoiceOpen(true)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
             padding: '7px 13px', borderRadius: 999, border: 'none',
@@ -222,6 +233,16 @@ export default function Threads({ user, showToast }) {
     <div>
       {header}
       {body}
+
+      {suggestOpen && (
+        <Modal title="Suggested links" onClose={() => setSuggestOpen(false)}>
+          <SuggestLinks
+            onClose={() => setSuggestOpen(false)}
+            onDone={refresh}
+            showToast={showToast}
+          />
+        </Modal>
+      )}
 
       {voiceOpen && (
         <Modal title="Capture" onClose={() => setVoiceOpen(false)}>
