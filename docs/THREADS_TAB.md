@@ -877,3 +877,259 @@ Converting an opportunity into a **task** — the third level in the dropdown �
 not built. It is a cross-table move (create on Master Action Board, retire the
 opportunity) and it deletes a record's stage history, so it wants an explicit
 confirm flow rather than a dropdown option that looks like the other two.
+
+---
+
+## 23. The Companies tab (2026-08-04)
+
+Companies were already the routing key for the whole CRM — an Activity links to
+exactly one, Documents and Folders are filed under one, an Opportunity's
+counterparty is one, a contact's employer is one — and the table was reachable
+from exactly two places: a chip on a contact row, and the picker in the
+opportunity popup. From neither could you create a company, edit one, see the
+whole list, or find out that four rows existed for the same counterparty.
+
+That absence is what made §b's free-text Company box map to nothing for so long.
+There was nowhere to send anyone.
+
+`src/views/Companies.jsx` is the list: name, type, status, **people**, **deals**,
+last activity, website. Row opens the existing `CompanySnapshot`; ✎ edits; ×
+deletes with a preview (§25).
+
+**The counts come from the child tables, not the company's link fields.** An
+Opportunity that links to a company does not necessarily appear in that
+company's `Opportunities` field — the link is only two-sided when somebody filled
+in both — and a count that reads low because of a one-sided link is worse than no
+count, because it looks authoritative. `companies-list.js` joins CRM Contacts,
+Opportunities and Activities to compute them, behind `?rollups=0` so the pickers
+that only want names do not pay for three extra table reads.
+
+Four scopes, and the fourth is the working list:
+
+| Scope | Is |
+|---|---|
+| Everyone | all of them |
+| Ours | has an Entity Code, is typed Internal, or is named OneVibe/OVMG |
+| Counterparties | everything else |
+| **Nothing linked** | no people and no deals — a typo from the contact form, or a record somebody made and abandoned |
+
+`Ours` needs the name check because two legacy records carry neither an Entity
+Code nor `Type = Internal`, the same exception `coo-participation-suggest.js`
+already handles.
+
+New endpoints: `companies-create`, `companies-update`, `companies-delete`,
+`companies-merge`. Create **matches before it creates**, through the same
+`companyKey` the contact form uses, and returns the existing record with
+`matchedExisting: true` rather than erroring — the caller wanted a company by
+that name and now has one either way. The toast says which happened, because
+silently "creating" a company that already existed is how people conclude the
+button is broken.
+
+`companyKey` moved to `src/lib/companyName.js` and `_companies.js` re-exports it
+(the `_stages.js` shim pattern). The tab's duplicate detection and the server's
+name resolution now cannot drift — if they normalised differently the tab would
+flag pairs the server already treats as one record, or miss pairs it had just
+silently created a second row for.
+
+---
+
+## 24. The merge screen (2026-08-04)
+
+The old one asked you to pick a record and pressed merge. Everything on the
+records you did not pick was deleted, sight unseen.
+
+Duplicates are almost never one full record and one empty one. The 2023 row has
+the phone number; the row somebody made last week has the LinkedIn and the right
+title. **Picking a survivor wholesale threw away real data every single time**,
+and there was no way to know what had just been lost.
+
+`src/views/MergeReview.jsx` serves both contacts and companies:
+
+1. Records side by side, **field by field**, with the ones that actually disagree
+   marked. Fields where every record agrees are collapsed — they are not a
+   decision.
+2. The winning value is picked **per field**, independently of which record
+   survives. Survivor = which id keeps the links. Field picks = which values the
+   merged record ends up holding.
+3. **Defaults cannot empty anything.** Each field starts on the survivor's value,
+   or — where the survivor is blank — the first non-blank value from any of the
+   others. Merging without touching a thing can only add data to the survivor.
+4. **What points at each record is shown before you choose.** "4 tasks · 2 deals ·
+   11 activities" is invisible from a name and an email, and it is the whole
+   answer to which id should live.
+
+The default survivor is the record carrying the **most inbound links**, not the
+oldest and not the first alphabetically. Repointing links is the one step of a
+merge that can silently half-fail, so the default does the least of it.
+
+Contact company links are **unioned, never chosen**: somebody who worked at two
+of the duplicated employers worked at both.
+
+### Finding them, in `src/lib/duplicates.js`
+
+The old rule was "same email, or byte-identical name". It missed the same person
+entered twice under a work and a personal address, and it missed punctuation
+differences — and it *fired* on a shape that is not a duplicate at all: two
+different people who share an inbox. Merging those destroys a real contact.
+
+Three keys, unioned — email, normalised name, last ten phone digits — with one
+guard: **an email match alone is not enough when the names are clearly different
+people.** Sharing `info@` is common; being the same person under two unrelated
+names is not.
+
+Normalisation detail that is load-bearing and was wrong on the first pass (the
+test caught it): apostrophes and periods are **deleted**, so `O'Brien` folds to
+`obrien` and matches `OBrien`. Everything else non-alphanumeric becomes a space,
+so hyphenated `Mary-Jane` still matches spaced `Mary Jane`. Turning apostrophes
+into spaces instead silently stops the detector firing on the single most common
+spelling difference there is.
+
+`src/lib/duplicates.test.js` covers all of it, including the shared-inbox refusal.
+
+---
+
+## 25. Deleting contacts and companies (2026-08-04)
+
+Two calls, deliberately. `GET ?id=…` returns what points at the record and writes
+nothing; `DELETE` removes it. The UI runs the preview first so the confirm can
+name the damage — *"4 tasks, 2 deals and 11 activities point at them and will be
+unlinked"* — instead of asking "are you sure?" about a record whose weight is
+invisible from a table row.
+
+A contact carrying real work is nearly always one you meant to **merge or bench**,
+not delete, and that only becomes obvious when you can see the weight. Both
+confirm dialogs say so in as many words.
+
+`netlify/functions/_links.js` is the shared bookkeeping — `previewLinks`,
+`repointLinks`, `clearLinks` — used by delete and merge on both tables. One list
+read per table, never a per-record lookup, since these run through the shared
+5-req/sec limiter.
+
+**It fixes a real omission in the old merge.** `Assigned To` on Master Action
+Board links to CRM Contacts and was not in the merge's link list, so merging a
+duplicate silently unassigned every task that person owned. It is in the shared
+list now, along with `Folders.Contact` and Participations when configured.
+
+Merge repoints links **before** deleting. If the delete ran first, a failure
+halfway through repointing would leave records pointing at an id that no longer
+exists, which Airtable renders as a blank link with no way to tell what it was.
+
+---
+
+## 26. Granola + Gmail auto-logging (2026-08-04)
+
+The Contacts board decides who "needs follow-up" from `Last Contacted`, and
+nothing wrote that field except a human pressing Log Contact. So the board
+flagged people you emailed that morning as untouched — and the flag is the thing
+the entire tab is organised around. Every one of those conversations existed, in
+Gmail and in Granola, and none of it reached the CRM.
+
+### The line this draws
+
+"Signals propose, humans dispose" (§3) holds, and it is a rule about *inference*.
+It is worth being exact about which half of this job is inference:
+
+| | |
+|---|---|
+| **THAT** a conversation happened | deterministic. Gmail has the thread, Granola has the call. **Auto-logged.** |
+| **WHAT** was agreed in it | inferred. **Stays in the review queue.** |
+
+So `crm-autolog.js` writes Activity rows and `Last Contacted`, and writes nothing
+else. No task is created, no stage advances, no obligation is closed. Granola's
+action extraction (`granola-poll` → `call_reviews` → Review tab) is untouched and
+is still the only path from a transcript to a commitment.
+
+### Why it does not reuse `coo-ingest-gmail`
+
+That job does the same Activity write, but only as a side effect of a full
+Supabase ingest: it needs `migrations/0002_coo_threads_schema.sql`, which is
+known-unrun (§15), and it dedupes against `coo_events` — so today it throws
+before it ever reaches the Airtable write. This runs on Airtable alone and works
+in the base as it actually stands. Both are idempotent and neither double-writes
+once the migration is applied, because both key off the same per-thread-per-day
+identity.
+
+### Dedupe without a schema change
+
+Activities has no dedupe column and adding one is a manual step, so the key rides
+in the Body as a trailing marker:
+
+```
+[autolog:gmail:<threadId>:<contactId>:<YYYY-MM-DD>]
+[autolog:granola:<documentId>]
+```
+
+One list read collects the markers already present. Re-running produces the same
+rows, any number of times.
+
+### Where it refuses to guess
+
+- **Contacts resolve by email, exactly.** Granola often supplies only a display
+  name, so an exact normalised full-name match is the fallback — and a name held
+  by two contacts matches neither, because that is a duplicate for §24 to settle,
+  not a match.
+- **Unmatched participants are reported, never created.** They are the actionable
+  output of a run: a name in that list means the conversation reached nobody's
+  timeline, and the fix is one contact record.
+- **Company is set only when there is exactly one candidate.** An Activity routes
+  to a single company by the locked CRM rule, so "several candidates" and "no
+  answer" are the same case, and the row still lands on the contact's timeline
+  where it is useful.
+- **`Last Contacted` only ever moves forward.** A backfill picking up a
+  three-week-old thread must not drag a fresh relationship backwards and fire the
+  follow-up flag on somebody you spoke to yesterday.
+- **Internal threads are skipped.** A thread with only our own addresses is a
+  memo, not a relationship. `AUTOLOG_OUR_DOMAINS` (plus `COO_OUR_ADDRESSES`)
+  decides who is us — set it, because a wrong list logs internal memos as
+  counterparty relationships.
+
+One Activity per **thread per person per day** for mail (a busy chain is one
+timeline line, not forty) and one per **call** for Granola, linked to every
+attendee, because a call is a single event where a mail thread is a copy each.
+
+**The schedule ships commented out** in `netlify.toml`, same as the Threads jobs
+and for the same reason: it writes to the live base unattended. Run it from
+**Settings → Auto-logging → Run now** first and read the unmatched list — that is
+what tells you whether the "us" configuration is right.
+
+---
+
+## 27. The opportunity popup got the screen (2026-08-04)
+
+§22 added level, links, per-task editing and deal cost to the popup, on top of
+the eleven fields that were already there — into a modal capped at 500px. It had
+become a scroll tunnel where the close button and the save row were both off
+screen, and the tasks (the stated *point* of the popup) were always below the
+fold.
+
+`Modal` now takes a `size`: `default` (500 / 580 tablet, unchanged), `wide` (880,
+used by the merge screen), and `full`. At `full` the title bar and the footer
+stop scrolling with the body — that is the point of the size, not decoration: in
+a long editor the close and save controls are what you reach for.
+
+The popup itself is two panes on desktop, split by **what you are doing** rather
+than by field type:
+
+- **The deal** — lane, paperwork, stage, entity, priority, kind, value, cost,
+  close date, probability, type (now three columns), next step, other party,
+  data room, notes.
+- **Who and what it touches** — companies, contacts, hierarchy, links, tasks.
+
+Mobile collapses to one column and keeps the existing full-bleed sheet.
+
+### Two things that were single-value and should not have been
+
+**Multi-people on the create form.** `Associated Contact` was always a
+`multipleRecordLinks` field. The popup was fixed in §22; the *create* form still
+kept only the first pick, so a deal created with three people on it arrived with
+one and the other two had to be added afterwards — which is the step that never
+happens. It is a chip list with a picker that stays visible, the same shape as
+the popup. This also fixes an edit-path bug: saving through the form used to
+collapse an existing multi-contact deal down to its first contact.
+
+**Create a company from the popup.** Same reasoning as Add contact in §cf67928:
+the counterparty's company turns up mid-deal, and sending you to another tab to
+create it and back here to link it is exactly why deals sit with no company on
+them and every Activity about them routes nowhere. Because it goes through
+`companies-create`, typing a name that already exists **links that record** rather
+than making a near-duplicate, and the toast says which happened.

@@ -315,7 +315,18 @@ export function Eyebrow({ children }) {
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
-export function Modal({ title, onClose, children }) {
+//
+// `size` picks how much room the dialog gets:
+//   'default'  500px (580 on tablet) — a form, a confirm, a short list.
+//   'wide'     880px — a comparison table, a two-column form.
+//   'full'     the whole viewport, minus a hairline. For a record editor with
+//              enough fields that a 500px column turns it into a scroll tunnel.
+//
+// At 'full' the title bar and the `footer` stop scrolling with the body. That
+// is the point of the size, not a decoration: in a long editor the close button
+// and the save row are what you reach for, and having to scroll back to the top
+// to find them is the thing that makes a cramped popup feel cramped.
+export function Modal({ title, sub = null, onClose, children, size = 'default', footer = null }) {
   const isMobile = useIsMobile();
   const isTablet = useDevice() === 'tablet';
   useEffect(() => {
@@ -324,27 +335,73 @@ export function Modal({ title, onClose, children }) {
     return () => document.removeEventListener('keydown', esc);
   }, [onClose]);
 
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 16 }}>
+  const full = size === 'full' && !isMobile;
+  const maxWidth = isMobile ? '100%'
+    : full ? 'none'
+    : size === 'wide' ? 880
+    : isTablet ? 580 : 500;
+
+  const shell = {
+    position: 'relative', background: C.bg,
+    borderRadius: isMobile ? 0 : full ? 14 : 16,
+    width: '100%', maxWidth,
+    boxShadow: isMobile ? 'none' : '0 24px 60px rgba(0,0,0,.4)',
+    animation: 'ovmgPop .18s cubic-bezier(.2,.9,.3,1)',
+  };
+  const closeBtn = (
+    <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: C.ink3, cursor: 'pointer', lineHeight: 1, zIndex: 2 }}>×</button>
+  );
+  const heading = (
+    <>
+      <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 19 : 22, letterSpacing: '-.02em', margin: 0, paddingRight: 30, color: C.ink9 }}>{title}</h2>
+      {sub && <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '.08em', textTransform: 'uppercase', color: C.ink3, marginTop: 5 }}>{sub}</div>}
+    </>
+  );
+
+  const backdrop = (
+    <>
       <style>{`
         @keyframes ovmgFade   { from { opacity: 0; } to { opacity: 1; } }
         @keyframes ovmgPop    { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
       `}</style>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(14,16,20,.5)', backdropFilter: 'blur(4px)', animation: 'ovmgFade .15s ease' }} />
+    </>
+  );
+
+  // Full screen: chrome is pinned, only the body scrolls.
+  if (full) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'grid', placeItems: 'center', padding: 14 }}>
+        {backdrop}
+        <div style={{ ...shell, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flexShrink: 0, padding: '18px 28px 14px', borderBottom: `1px solid ${C.cr2}` }}>
+            {closeBtn}
+            {heading}
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 28px' }}>{children}</div>
+          {footer && (
+            <div style={{ flexShrink: 0, borderTop: `1px solid ${C.cr2}`, padding: '12px 28px', background: C.bg }}>{footer}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Everything else keeps the original single-scroll shape.
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 16 }}>
+      {backdrop}
       <div style={{
-        position: 'relative', background: C.bg,
-        borderRadius: isMobile ? 0 : 16,
+        ...shell,
         padding: isMobile ? '20px 16px' : 24,
-        width: '100%', maxWidth: isMobile ? '100%' : isTablet ? 580 : 500,
         maxHeight: isMobile ? '100vh' : '85vh',
         height: isMobile ? '100vh' : 'auto',
         overflowY: 'auto',
-        boxShadow: isMobile ? 'none' : '0 24px 60px rgba(0,0,0,.4)',
-        animation: 'ovmgPop .18s cubic-bezier(.2,.9,.3,1)',
       }}>
-        <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: C.ink3, cursor: 'pointer' }}>×</button>
-        <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 19 : 22, letterSpacing: '-.02em', margin: '0 0 16px', color: C.ink9 }}>{title}</h2>
+        {closeBtn}
+        <div style={{ marginBottom: 16 }}>{heading}</div>
         {children}
+        {footer && <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${C.cr2}` }}>{footer}</div>}
       </div>
     </div>
   );

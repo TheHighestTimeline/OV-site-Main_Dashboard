@@ -162,6 +162,8 @@ export const TAB_ACCESS = {
   'my-day':     ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   'audio-dump': ['admin'],
   contacts:     ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
+  // Same audience as Contacts — it is the same CRM, one level up.
+  companies:    ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   tasks:        ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   kanban:       ['admin', 'executive', 'operations', 'member', 'senior_partner', 'read_only'],
   review:       ['admin', 'executive', 'operations', 'senior_partner'],
@@ -205,7 +207,7 @@ for (const tab of Object.keys(TAB_ACCESS)) {
 
 export const ALL_TABS = [
   'overview', 'my-day', 'audio-dump', 'review',
-  'contacts', 'tasks', 'outreach', 'social',
+  'contacts', 'companies', 'tasks', 'outreach', 'social',
   'websites', 'tools', 'booking', 'references',
   'ncnda', 'signature', 'email', 'financial',
   'team-goals', 'settings', 'admin', 'cost', 'threads',
@@ -221,6 +223,7 @@ export const TAB_LABELS = {
   'audio-dump':      'Audio Dump',
   review:            'Review',
   contacts:          'Contacts',
+  companies:         'Companies',
   tasks:             'Tasks',
   outreach:          'Outreach',
   social:            'Clients',

@@ -43,6 +43,22 @@
 [functions."weekly-report"]
   schedule = "0 12 * * 5"
 
+# crm-autolog: Granola calls + Gmail threads → Activity rows, and Last Contacted
+# on the matched contact. Hourly.
+#
+# SHIPS OFF, like the Threads jobs below, and for the same reason: it writes to
+# the live Airtable base unattended. Run it by hand first from
+# Settings → Auto-logging → "Run now" and read what it reports — particularly the
+# unmatched list, which tells you whether COO_OUR_ADDRESSES and
+# AUTOLOG_OUR_DOMAINS are set correctly. A wrong "us" list logs your own internal
+# memos as counterparty relationships, and that is tedious to unpick afterwards.
+#
+# It is idempotent (every row carries a dedupe marker), it creates no tasks and
+# moves no stages, and it never invents a contact — so once the first manual run
+# looks right, the schedule adds no new class of risk.
+# [functions."crm-autolog"]
+#   schedule = "0 * * * *"
+
 # ── Threads tab scheduled jobs (WP3, WP5, WP6, WP11) ─────────────────────────
 #
 # DELIBERATELY DISABLED ON FIRST DEPLOY. Uncomment each block once you have

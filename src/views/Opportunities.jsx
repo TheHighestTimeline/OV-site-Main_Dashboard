@@ -8,7 +8,7 @@ import TaskRowEditor from './opportunities/TaskRowEditor.jsx';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
          getAirtableSchema, airtableRecordUrl, getAppState, setAppState,
-         createContact } from '../api.js';
+         createContact, createCompany } from '../api.js';
 import { dealCategoryMatchesSlug, SLUG_TO_DEAL_CATEGORY, COMPANIES, COMPANY_META } from '../constants/roles.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 
@@ -298,7 +298,8 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null, allOpp
 // both editable pickers AND clickable chips that jump into the CRM. The tasks
 // underneath this opportunity sit at the bottom (add / advance / edit / remove,
 // live against the Master Action Board).
-function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild, onDuplicate, onConvertToTask }) {
+function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild, onDuplicate, onConvertToTask, onCompaniesChanged }) {
+  const isMobile = useIsMobile();
   const lane   = canonicalStage(opp.stage, opp.lane);
   const sStyle = STAGE_STYLE[lane] || {};
   const save   = (patch) => onPatch(opp.id, patch);
@@ -338,6 +339,49 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       companyIds: (opp.companyIds || []).filter(x => x !== id),
       companies:  (opp.companies  || []).filter(x => x.id !== id),
     });
+  };
+
+  // Create a company and link it without leaving the deal. Same reasoning as
+  // Add contact: the counterparty's company turns up mid-deal, and sending you
+  // to another tab to create it and back here to link it is exactly why deals
+  // sit with no company on them and every Activity about them routes nowhere.
+  //
+  // The server matches an existing name before creating (`_companies.js`), so
+  // typing a company that already exists links THAT record rather than making a
+  // near-duplicate — and says which happened.
+  const [addingCompany, setAddingCompany] = useState(false);
+  const [ncoBusy, setNcoBusy] = useState(false);
+  const [nco, setNco] = useState({ name: '', website: '', type: '' });
+
+  const saveNewCompany = async () => {
+    if (!nco.name.trim()) return;
+    setNcoBusy(true);
+    try {
+      const created = await createCompany({
+        name:    nco.name.trim(),
+        website: nco.website.trim(),
+        type:    nco.type || '',
+      });
+      cacheClear('companies');
+      if ((opp.companyIds || []).includes(created.id)) {
+        showToast?.(`${created.name} is already linked to this deal`);
+      } else {
+        save({
+          companyIds: [...(opp.companyIds || []), created.id],
+          companies:  [...(opp.companies  || []), { id: created.id, name: created.name }],
+        });
+        showToast?.(created.matchedExisting
+          ? `${created.name} already existed — linked that one ✓`
+          : `${created.name} created and linked ✓`);
+      }
+      onCompaniesChanged?.();
+      setNco({ name: '', website: '', type: '' });
+      setAddingCompany(false);
+    } catch (e) {
+      showToast?.('Could not add company: ' + e.message);
+    } finally {
+      setNcoBusy(false);
+    }
   };
   // Multi-select, like companies. A deal routinely has several people on it and
   // forcing one meant the rest were tracked nowhere.
@@ -388,10 +432,40 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
     });
   };
 
+  // Two panes on desktop: the record's own fields on the left, everything it is
+  // CONNECTED to on the right (companies, people, hierarchy, links, tasks).
+  // The split is by what you are doing, not by field type — you come here either
+  // to change the deal or to work the relationships around it, and in a 500px
+  // column the second half was always below the fold.
+  const twoPane = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.05fr) minmax(0, 1fr)', gap: isMobile ? 18 : 30, alignItems: 'start' };
+  const fieldGrid = { display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 12 };
+  const paneTitle = { fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.ink3, borderBottom: `1px solid ${C.cr2}`, paddingBottom: 6, marginBottom: 12 };
+
+  const footer = (
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <a href={airtableRecordUrl(tableId, opp.id)} target="_blank" rel="noopener noreferrer"
+        style={{ fontFamily: MONO, fontSize: 11, color: C.ink5, textDecoration: 'none', whiteSpace: 'nowrap' }}>
+        ⊞ Airtable ↗
+      </a>
+      <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>edits save instantly</span>
+      <span style={{ flex: 1 }} />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Btn v="gho" onClick={onEdit} title="Rename or delete">✎ Rename / delete</Btn>
+        <Btn onClick={onClose}>Done</Btn>
+      </div>
+    </div>
+  );
+
   return (
-    <Modal title={opp.name} onClose={onClose}>
+    <Modal
+      title={opp.name}
+      sub={`${lane}${opp.entity ? ` · ${opp.entity}` : ''} · ${levelOf(opp)}`}
+      onClose={onClose}
+      size="full"
+      footer={footer}
+    >
       {/* Lane badge + entity — everything below it is editable in place */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
         <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: sStyle.hBg || C.ink5, color: '#fff', borderRadius: 999, padding: '2px 9px' }}>
           {lane}{opp.stage && opp.stage !== lane ? ` · ${opp.stage}` : ''}
         </span>
@@ -408,11 +482,14 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
         {onConvertToTask && (
           <button onClick={() => onConvertToTask(opp)} title="Turn this into a task on the board" style={hdrBtn}>→ Task</button>
         )}
-        <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>edits save instantly</span>
       </div>
 
+      <div style={twoPane}>
+      {/* ══ LEFT: the deal's own fields ══════════════════════════════════════ */}
+      <div style={{ minWidth: 0 }}>
+      <div style={paneTitle}>The deal</div>
       {/* ── Live entry fields ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div style={fieldGrid}>
         <div>
           <span style={lbl}>Lane</span>
           {/* Board order, NOT alphabetical. These seven are a workflow and
@@ -511,8 +588,20 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
         </div>
       </div>
 
+      <div style={{ marginBottom: 4 }}>
+        <span style={lbl}>Notes</span>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={isMobile ? 3 : 8}
+          onBlur={() => { if (notes !== (opp.notes || '')) save({ notes }); }}
+          placeholder="Key context…" style={{ ...inp, resize: 'vertical', lineHeight: 1.5 }} />
+      </div>
+      </div>
+
+      {/* ══ RIGHT: everything this deal is connected to ═════════════════════ */}
+      <div style={{ minWidth: 0 }}>
+      <div style={paneTitle}>Who and what it touches</div>
+
       {/* ── Linked CRM company (multi) — chips jump to the snapshot, ×
-             unlinks, dropdown adds ── */}
+             unlinks, dropdown adds, and ＋ creates one inline ── */}
       <div style={{ marginBottom: 10 }}>
         <span style={lbl}>Companies (CRM)</span>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -529,7 +618,42 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
               .filter(c => !(opp.companyIds || []).includes(c.id))
               .map(c => <option key={c.id} value={c.id}>{c.name}{c.entityCode ? ` (${c.entityCode})` : ''}</option>)}
           </select>
+          <button onClick={() => setAddingCompany(v => !v)} style={hdrBtn}>
+            {addingCompany ? 'Cancel' : '＋ Add company'}
+          </button>
         </div>
+
+        {addingCompany && (
+          <div style={{ marginTop: 8, padding: '10px 12px', border: `1px solid ${C.acc}`, borderRadius: 9, background: C.bg2 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <span style={lbl}>Name *</span>
+                <input value={nco.name} onChange={e => setNco(p => ({ ...p, name: e.target.value }))}
+                  onKeyDown={e => { if (e.key === 'Enter') saveNewCompany(); }} style={inp} autoFocus />
+              </div>
+              <div>
+                <span style={lbl}>Website</span>
+                <input value={nco.website} onChange={e => setNco(p => ({ ...p, website: e.target.value }))} placeholder="https://…" style={inp} />
+              </div>
+              <div>
+                <span style={lbl}>Type</span>
+                <select value={nco.type} onChange={e => setNco(p => ({ ...p, type: e.target.value }))} style={inp}>
+                  <option value="">— None</option>
+                  <option>External</option><option>Internal</option><option>Client</option>
+                  <option>Partner</option><option>Vendor</option><option>Investor</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+              <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, marginRight: 'auto' }}>
+                An existing name links that record instead of duplicating it.
+              </span>
+              <button onClick={saveNewCompany} disabled={ncoBusy || !nco.name.trim()} style={{
+                ...hdrBtn, borderColor: nco.name.trim() ? C.acc : C.cr3, color: nco.name.trim() ? C.acc : C.ink3,
+              }}>{ncoBusy ? 'Adding…' : 'Create and link'}</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Linked CRM contacts — chips jump to the profile, dropdown adds ──
@@ -600,25 +724,9 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
 
       <LinksEditor opp={opp} onSave={save} />
 
-      <div style={{ marginBottom: 4 }}>
-        <span style={lbl}>Notes</span>
-        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
-          onBlur={() => { if (notes !== (opp.notes || '')) save({ notes }); }}
-          placeholder="Key context…" style={{ ...inp, resize: 'vertical', lineHeight: 1.5 }} />
-      </div>
-
       {/* THE point of this popup: the tasks underneath this opportunity */}
       <LinkedTasks oppId={opp.id} companyCat={opp.entity} showToast={showToast} extraTaskIds={opp.taskIds} allOpps={allOpps || []} />
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, gap: 8, flexWrap: 'wrap' }}>
-        <a href={airtableRecordUrl(tableId, opp.id)} target="_blank" rel="noopener noreferrer"
-          style={{ fontFamily: MONO, fontSize: 11, color: C.ink5, textDecoration: 'none', whiteSpace: 'nowrap' }}>
-          ⊞ Airtable ↗
-        </a>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Btn v="gho" onClick={onEdit} title="Rename or delete">✎ Rename / delete</Btn>
-          <Btn onClick={onClose}>Done</Btn>
-        </div>
+      </div>
       </div>
     </Modal>
   );
@@ -639,8 +747,12 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
     entity: initial?.entity || (Array.isArray(initial?.dealCategory) ? initial.dealCategory[0] : initial?.dealCategory) || '',
     // Derive the Internal/External toggle from the saved opportunity if present.
     kanbanType: initial?.kanbanType || '',
-    // §7: linked CRM contact (Airtable 'Associated Contact')
-    contactId: (initial?.contactIds || [])[0] || '',
+    // Linked CRM contacts (Airtable 'Associated Contact'). A LIST, not one.
+    // The field was always `multipleRecordLinks`; this form kept only the first
+    // pick, so a deal created with three people on it arrived with one, and the
+    // other two had to be added afterwards from the popup — which is the step
+    // that never happens.
+    contactIds: Array.isArray(initial?.contactIds) ? [...initial.contactIds] : [],
     priority:    initial?.priority || '',
     kind:        initial?.kind || '',
     probability: initial?.probability != null ? String(initial.probability) : '',
@@ -738,13 +850,28 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
           })}
         </div>
       </FR>
-      <FR label="Linked contact (CRM)">
-        <select value={f.contactId} onChange={fld('contactId')} style={inp} disabled={contactOpts === null}>
-          <option value="">{contactOpts === null ? 'Loading contacts…' : '— None'}</option>
-          {(contactOpts || []).map(c => (
-            <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>
-          ))}
-        </select>
+      <FR label="Linked contacts (CRM)">
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {f.contactIds.map(id => {
+            const c = (contactOpts || []).find(x => x.id === id);
+            return (
+              <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 999, fontSize: 11, fontFamily: SANS, background: C.bluS, color: C.blu, border: `1px solid ${C.blu}30` }}>
+                ◉ {c?.name || 'Contact'}
+                <span onClick={() => setF(p => ({ ...p, contactIds: p.contactIds.filter(x => x !== id) }))}
+                  title="Remove" style={{ cursor: 'pointer', opacity: .6 }}>×</span>
+              </span>
+            );
+          })}
+          {/* Stays visible after the first pick — that is the whole difference. */}
+          <select value="" disabled={contactOpts === null}
+            onChange={e => { const id = e.target.value; if (id) setF(p => ({ ...p, contactIds: [...p.contactIds, id] })); }}
+            style={{ ...inp, width: 'auto', flex: '1 1 180px' }}>
+            <option value="">{contactOpts === null ? 'Loading contacts…' : f.contactIds.length ? '+ Add another…' : '+ Link a contact…'}</option>
+            {(contactOpts || []).filter(c => !f.contactIds.includes(c.id)).map(c => (
+              <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>
+            ))}
+          </select>
+        </div>
       </FR>
       <FR label="Notes">
         <textarea value={f.notes} onChange={fld('notes')} rows={3} placeholder="Key context…"
@@ -766,7 +893,7 @@ function OppForm({ initial, categories, onSave, onDelete, onClose, saving, showT
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn v="gho" onClick={onClose} disabled={saving}>Cancel</Btn>
-          <Btn onClick={() => { if (!f.name.trim()) { showToast?.('Name required'); return; } const { contactId, ...rest } = f; onSave({ ...rest, contactIds: contactId ? [contactId] : [], dealValue: f.dealValue ? parseFloat(f.dealValue) : null, probability: f.probability !== '' ? parseFloat(f.probability) : null, dealCategory: f.entity ? [f.entity] : [] }); }} disabled={saving || !f.name.trim()}>
+          <Btn onClick={() => { if (!f.name.trim()) { showToast?.('Name required'); return; } onSave({ ...f, contactIds: f.contactIds, dealValue: f.dealValue ? parseFloat(f.dealValue) : null, probability: f.probability !== '' ? parseFloat(f.probability) : null, dealCategory: f.entity ? [f.entity] : [] }); }} disabled={saving || !f.name.trim()}>
             {saving ? 'Saving…' : isEdit ? 'Save' : 'Create'}
           </Btn>
         </div>
@@ -1053,12 +1180,18 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
     try { localStorage.setItem('ovmg.opps.level', v); } catch { /* private mode */ }
   };
   const [contactsList,  setContactsList]  = useState([]);
+  // The picker only needs names, so it skips the joined people/deal rollups.
+  const loadCompanies = useCallback(() => (
+    getCompanies({ rollups: false })
+      .then(cs => setCompaniesList((cs || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''))))
+      .catch(() => {})
+  ), []);
   useEffect(() => {
-    getCompanies().then(cs => setCompaniesList((cs || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')))).catch(() => {});
+    loadCompanies();
     const cached = cacheGet('contacts');
     if (cached) setContactsList(cached);
     getContacts().then(cs => { cacheSet('contacts', cs); setContactsList(cs || []); }).catch(() => {});
-  }, []);
+  }, [loadCompanies]);
 
   // Live-edit a single opportunity field: optimistic local update + immediate
   // Airtable write; on failure the toast reports it and a reload restores truth.
@@ -1422,6 +1555,7 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
               onDuplicate={duplicateOpp}
               onConvertToTask={convertToTask}
+              onCompaniesChanged={loadCompanies}
             />
           );
         })()}
@@ -1516,6 +1650,7 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
             onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
             onDuplicate={duplicateOpp}
             onConvertToTask={convertToTask}
+            onCompaniesChanged={loadCompanies}
           />
         );
       })()}

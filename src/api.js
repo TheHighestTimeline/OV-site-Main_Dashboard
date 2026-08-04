@@ -100,7 +100,16 @@ export const getClients     = ()         => req('clients-list');
 export const getContacts   = ()         => req('contacts-list');
 export const createContact = data       => req('contacts-create', { method: 'POST',  body: JSON.stringify(data) });
 export const updateContact = (id, data) => req('contacts-update', { method: 'PATCH', body: JSON.stringify({ id, ...data }) });
-export const mergeContacts = (keepId, dropId) => req('contacts-merge', { method: 'POST', body: JSON.stringify({ keepId, dropId }) });
+// Merge: `fields` carries the field-by-field survivor picks made on the merge
+// screen, applied to the keeper in the same call so it is never half-merged.
+export const mergeContacts = (keepId, dropIds, fields = undefined, companyIds = undefined) =>
+  req('contacts-merge', { method: 'POST', body: JSON.stringify({ keepId, dropIds: [].concat(dropIds), fields, companyIds }) });
+// Read-only: what each candidate holds, and what points at it.
+export const previewContactMerge = (ids) =>
+  req('contacts-merge', { method: 'POST', body: JSON.stringify({ preview: true, ids }) });
+// Two calls by design — GET previews what a delete would unlink, DELETE does it.
+export const previewContactDelete = (id) => req(`contacts-delete?id=${encodeURIComponent(id)}`);
+export const deleteContact = (id) => req('contacts-delete', { method: 'DELETE', body: JSON.stringify({ id }) });
 
 // Notes (contact notes)
 export const getNotes    = contactId    => req(`notes-list?contactId=${contactId}`);
@@ -109,7 +118,23 @@ export const updateNote  = (id, data)   => req('notes-update',  { method: 'PATCH
 export const deleteNote  = id           => req('notes-delete',  { method: 'POST',  body: JSON.stringify({ id }) });
 
 // Companies (entity master list — Entity Code/Type/Parent Company/Subject Descriptor)
-export const getCompanies = () => req('companies-list');
+// `rollups: false` skips the joined people/deal/last-activity counts. Pickers
+// pass it; the Companies tab does not.
+export const getCompanies = ({ rollups = true } = {}) =>
+  req(`companies-list${rollups ? '' : '?rollups=0'}`);
+export const createCompany = (data)     => req('companies-create', { method: 'POST',  body: JSON.stringify(data) });
+export const updateCompany = (id, data) => req('companies-update', { method: 'PATCH', body: JSON.stringify({ id, ...data }) });
+export const previewCompanyDelete = (id) => req(`companies-delete?id=${encodeURIComponent(id)}`);
+export const deleteCompany = (id) => req('companies-delete', { method: 'DELETE', body: JSON.stringify({ id }) });
+export const previewCompanyMerge = (ids) =>
+  req('companies-merge', { method: 'POST', body: JSON.stringify({ preview: true, ids }) });
+export const mergeCompanies = (keepId, dropIds, fields = undefined) =>
+  req('companies-merge', { method: 'POST', body: JSON.stringify({ keepId, dropIds: [].concat(dropIds), fields }) });
+
+// Granola + Gmail auto-logging. Writes Activity rows and Last Contacted only —
+// it never creates a task or moves a stage. See netlify/functions/crm-autolog.js.
+export const runAutoLog = (only = null) =>
+  req(`crm-autolog${only ? `?only=${only}` : ''}`, { method: 'POST', body: '{}' });
 
 // Activities (contact/company interaction timeline — calls, notes, meetings,
 // voice notes, transcripts. Distinct from the older per-contact Notes above:
