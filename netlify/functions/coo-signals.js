@@ -20,7 +20,7 @@
 import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps } from './_cooAccess.js';
 import { getUser } from './_auth.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { TB, listRecordsLenient, updateRecords } from './_airtable.js';
 import { getParticipation } from './_participations.js';
 import { isTerminalTaskStatus } from './_stages.js';
@@ -53,7 +53,7 @@ export const handler = async (event) => {
       else if (status !== 'all') query = query.eq('status', status);
 
       const { data, error } = await query;
-      if (error) return err(500, error.message);
+      if (error) return err(500, explainSupabaseError(error));
 
       // Resolve participation labels so each row reads as a sentence rather
       // than a record id. A queue you have to decode is a queue nobody clears.
@@ -144,7 +144,7 @@ export const handler = async (event) => {
     return ok({ id, decision, tasksClosed });
   } catch (e) {
     console.error('[coo-signals]', e?.message || String(e));
-    return err(500, e?.message || 'Signal operation failed');
+    return err(500, explainSupabaseError(e) || 'Signal operation failed');
   }
 };
 

@@ -5,7 +5,7 @@
 //     &contactId=...  |  &workstreamId=...  &before=<ISO>
 import { ok, err, CORS } from './_http.js';
 import { requireRole } from './_auth.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };
@@ -37,7 +37,7 @@ export const handler = async (event) => {
     if (q.before) query = query.lt('occurred_at', q.before);
 
     const { data, error } = await query;
-    if (error) return err(500, error.message);
+    if (error) return err(500, explainSupabaseError(error));
 
     // Oldest first for rendering. The timeline reads top to bottom.
     const events = (data || []).reverse().map(e => ({
@@ -61,6 +61,6 @@ export const handler = async (event) => {
     });
   } catch (e) {
     console.error('[coo-events-list]', e?.message || String(e));
-    return err(500, e?.message || 'Failed to load timeline');
+    return err(500, explainSupabaseError(e) || 'Failed to load timeline');
   }
 };

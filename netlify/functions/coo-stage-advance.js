@@ -18,7 +18,7 @@
 import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps } from './_cooAccess.js';
 import { getUser } from './_auth.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { TB, listRecords, createRecords, dateOnly } from './_airtable.js';
 import { getParticipation, updateParticipation, participationsConfigured, NOT_CONFIGURED_MSG } from './_participations.js';
 import {
@@ -213,7 +213,7 @@ export const handler = async (event) => {
     });
   } catch (e) {
     console.error('[coo-stage-advance]', e?.message || String(e));
-    return err(500, e?.message || 'Stage change failed');
+    return err(500, explainSupabaseError(e) || 'Stage change failed');
   }
 };
 

@@ -1,5 +1,5 @@
 // List call reviews (Review page + nav badge). ?status=pending&countOnly=1
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { requireRole } from './_auth.js';
 import { ok, err, CORS } from './_http.js';
 
@@ -33,6 +33,6 @@ export const handler = async (event) => {
     return ok(data || []);
   } catch (e) {
     console.error('reviews-list error:', e);
-    return err(500, e.message);
+    return err(500, explainSupabaseError(e));
   }
 };

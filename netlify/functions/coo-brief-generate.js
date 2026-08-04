@@ -18,7 +18,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps } from './_cooAccess.js';
 import { getUser } from './_auth.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { logUsage, tokensFromAnthropic } from './_usage.js';
 import { TB, listRecords, updateRecords } from './_airtable.js';
 import { getParticipation } from './_participations.js';
@@ -214,7 +214,7 @@ export const handler = async (event) => {
     return ok({ brief: shape(record), cached: false });
   } catch (e) {
     console.error('[coo-brief-generate]', e?.message || String(e));
-    return err(500, e?.message || 'Brief generation failed');
+    return err(500, explainSupabaseError(e) || 'Brief generation failed');
   }
 };
 

@@ -13,7 +13,7 @@
 import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps } from './_cooAccess.js';
 import { getUser } from './_auth.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { TB, listRecords, getRecord } from './_airtable.js';
 import { routeParticipation, participationsConfigured } from './_participations.js';
 
@@ -42,7 +42,7 @@ export const handler = async (event) => {
       if (status === 'unmatched') query = query.is('contact_airtable_id', null);
 
       const { data, error } = await query;
-      if (error) return err(500, error.message);
+      if (error) return err(500, explainSupabaseError(error));
 
       // Message counts give the queue an order that means something: an address
       // that emailed twelve times matters more than one that emailed once.
@@ -108,7 +108,7 @@ export const handler = async (event) => {
     query = id ? query.eq('id', id) : query.eq('channel', channel).eq('handle', handle);
 
     const { data, error } = await query.select().single();
-    if (error) return err(500, error.message);
+    if (error) return err(500, explainSupabaseError(error));
 
     // Backfill: every thread and event already ingested for this handle was
     // filed against a null contact. Attach them now, or the history the user
@@ -126,7 +126,7 @@ export const handler = async (event) => {
     });
   } catch (e) {
     console.error('[coo-identities]', e?.message || String(e));
-    return err(500, e?.message || 'Identity operation failed');
+    return err(500, explainSupabaseError(e) || 'Identity operation failed');
   }
 };
 

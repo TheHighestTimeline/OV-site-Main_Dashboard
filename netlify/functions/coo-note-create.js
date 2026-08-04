@@ -13,7 +13,7 @@
 // }
 import { ok, err, CORS } from './_http.js';
 import { requireRole, getUser } from './_auth.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 
 const MAX_LEN = 5000;
 
@@ -70,7 +70,7 @@ export const handler = async (event) => {
       dedupe_key:  null,
     }).select().single();
 
-    if (error) return err(500, error.message);
+    if (error) return err(500, explainSupabaseError(error));
 
     // A new note changes what the brief should say.
     if (participationId) {
@@ -90,6 +90,6 @@ export const handler = async (event) => {
     });
   } catch (e) {
     console.error('[coo-note-create]', e?.message || String(e));
-    return err(500, e?.message || 'Failed to save note');
+    return err(500, explainSupabaseError(e) || 'Failed to save note');
   }
 };

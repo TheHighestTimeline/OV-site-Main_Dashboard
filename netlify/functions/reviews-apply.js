@@ -10,7 +10,7 @@
 //   { kind:'newContact',    name, company?, role?, email?, phone?, type? }
 //   { kind:'contactNote',   contactId, title?, note }        → Activities row linked to contact
 //   { kind:'note',          title, body }                    → Activities row (unlinked)
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { requireRole, getUser } from './_auth.js';
 import { ok, err, CORS } from './_http.js';
 import {
@@ -132,6 +132,6 @@ export const handler = async (event) => {
     return ok({ status, appliedCount: applied.length, failures });
   } catch (e) {
     console.error('reviews-apply error:', e);
-    return err(500, e.message);
+    return err(500, explainSupabaseError(e));
   }
 };

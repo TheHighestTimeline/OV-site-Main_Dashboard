@@ -14,7 +14,7 @@
 
 import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps, entityFilterFor } from './_cooAccess.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import {
   TB, listRecords, listRecordsLenient, fromAirtableRecord,
   CONTACTS_MAP, OPPORTUNITIES_MAP,
@@ -253,6 +253,6 @@ export const handler = async (event) => {
     });
   } catch (e) {
     console.error('[coo-threads-data]', e?.message || String(e));
-    return err(500, e?.message || 'Failed to load Threads data');
+    return err(500, explainSupabaseError(e) || 'Failed to load Threads data');
   }
 };

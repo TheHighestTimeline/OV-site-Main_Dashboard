@@ -1,5 +1,5 @@
 // Dismiss a review or edit its proposed actions (before approval).
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { requireRole, getUser } from './_auth.js';
 import { ok, err, CORS } from './_http.js';
 
@@ -29,6 +29,6 @@ export const handler = async (event) => {
     return ok({ updated: true });
   } catch (e) {
     console.error('reviews-update error:', e);
-    return err(500, e.message);
+    return err(500, explainSupabaseError(e));
   }
 };

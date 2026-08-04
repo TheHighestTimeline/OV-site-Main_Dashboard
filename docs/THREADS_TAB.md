@@ -493,3 +493,34 @@ case-insensitive and trims. Every call site routes through it:
 **If someone adds a twelfth status option, classify it in that one list.** The
 whole reason this bug existed is that the answer to "is this task finished" was
 written out longhand in eleven different places and only two of them agreed.
+
+
+---
+
+## 15. Supabase migrations: which have actually been run
+
+**Nothing tracks this.** The schema is spread across a dozen `.sql` files at the
+repo root plus `migrations/`, and there is no applied-migrations table, so the
+only way anyone discovers an unrun migration is by hitting a PostgREST error:
+
+```
+Could not find the table 'public.call_reviews' in the schema cache
+```
+
+`explainSupabaseError()` in `_supabase.js` now translates that into the name of
+the file to run, and every Supabase-backed endpoint routes its errors through it.
+
+**Known unrun as of 2026-08-04:**
+
+| File | Creates | Symptom while unrun |
+|---|---|---|
+| `supabase-call-reviews-schema.sql` | `call_reviews` | Review tab errors on load. `granola-poll` has been failing every 15 minutes since it was scheduled. |
+| `migrations/0002_coo_threads_schema.sql` | the nine `coo_*` tables | Threads timeline, notes, signals, briefs and both queues all error. The Opportunities and People views still render, since they read Airtable. |
+
+**Do NOT run `migrations/0001_full_schema.sql` to "catch up".** Despite its
+header claiming it is safe to re-run, it opens with `DROP TABLE ... CASCADE` on
+44 tables. It is a from-scratch baseline, not an idempotent migration. Running it
+against the live database destroys everything in those tables.
+
+Both files listed above are `create table if not exists` throughout and are
+genuinely safe to run and re-run.

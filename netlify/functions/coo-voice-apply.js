@@ -16,7 +16,7 @@
 import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps } from './_cooAccess.js';
 import { getUser } from './_auth.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { TB, listRecords, createRecords, updateRecords } from './_airtable.js';
 import { isTerminalTaskStatus } from './_stages.js';
 
@@ -217,6 +217,6 @@ export const handler = async (event) => {
     return ok(result);
   } catch (e) {
     console.error('[coo-voice-apply]', e?.message || String(e));
-    return err(500, e?.message || 'Voice apply failed');
+    return err(500, explainSupabaseError(e) || 'Voice apply failed');
   }
 };

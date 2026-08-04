@@ -14,7 +14,7 @@
 
 import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps, entityFilterFor } from './_cooAccess.js';
-import { getSupabase } from './_supabase.js';
+import { getSupabase, explainSupabaseError } from './_supabase.js';
 import { TB, listRecords, listRecordsLenient } from './_airtable.js';
 import { listParticipations } from './_participations.js';
 import { LABEL_TO_ID, getStage, daysInStage, slaStatus, isTerminalTaskStatus } from './_stages.js';
@@ -272,6 +272,6 @@ export const handler = async (event) => {
     });
   } catch (e) {
     console.error('[coo-triage]', e?.message || String(e));
-    return err(500, e?.message || 'Triage failed');
+    return err(500, explainSupabaseError(e) || 'Triage failed');
   }
 };
