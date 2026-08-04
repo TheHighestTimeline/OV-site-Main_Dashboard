@@ -684,3 +684,28 @@ workstreams**, all correct on inspection: five BrightSunSolr people onto the JV,
 Mark Bedore onto four Everything Rave workstreams, plus Genesis, 808 Amp,
 Sustopia and Pro Performance. The button is in the Threads header and hides
 itself once 25 participations exist, since it is an onboarding tool.
+
+---
+
+## 19. The rail groups by entity (2026-08-04)
+
+Forty opportunities in one flat list is a dump you scroll, not a rail you
+navigate. The program level cannot carry the grouping because `Parent
+Opportunity` is empty across the whole base, but `Entity` is set on 39 of 40 and
+maps to how the business is actually divided, so that is the axis the rail uses.
+
+The tree is **Entity → Program → Workstream**, and it collapses to Entity →
+Workstream while nothing is parented — which is the state the base is in. Setting
+`Parent Opportunity` on anything makes the middle level appear for that entity
+without any other change.
+
+Also in the rail:
+- A filter box, shown once there are more than eight rows. Filtering force-opens
+  every section, since making the user re-open collapsed groups to see their own
+  search hits defeats the search.
+- Deals sort above internal workstreams inside each entity. A counterparty deal
+  is what you came here to work; an internal build should not sit above it.
+- A filled dot marks a Deal, a hollow one an internal Workstream, read straight
+  off the existing `Kind` field.
+- Entities sort by live participant count, then alphabetically. The no-entity
+  bucket always sinks last — it is the one that needs cleaning up.

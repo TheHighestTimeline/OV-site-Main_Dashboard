@@ -144,8 +144,20 @@ export default function OpportunitiesView({
 }
 
 // ── Left rail ────────────────────────────────────────────────────────────────
+//
+// GROUPED BY ENTITY, not by program. Forty opportunities in one flat list is a
+// dump you scroll rather than a rail you navigate, and the program level cannot
+// carry the grouping on its own because Parent Opportunity is empty across the
+// whole base. Entity is set on 39 of 40 and maps to how the business is actually
+// divided, so it is the axis that organises the rail today.
+//
+// Programs still nest inside their entity the moment any exist. The tree is
+// Entity → Program → Workstream, and it collapses to Entity → Workstream while
+// nothing is parented, which is the state the base is in.
 
 function Rail({ programs, workstreams, orphans, participations, openPrograms, toggleProgram, active, onPick }) {
+  const [filter, setFilter] = useState('');
+
   const countsFor = (wsId) => {
     const members = participations.filter(p => p.workstreamId === wsId);
     return {
@@ -153,6 +165,60 @@ function Rail({ programs, workstreams, orphans, participations, openPrograms, to
       blocked: members.filter(p => p.waitingOn === 'Us' || p.blockingItem).length,
     };
   };
+
+  // Entity buckets, each holding its programs and its unparented workstreams.
+  const groups = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const hit = (name) => !q || String(name || '').toLowerCase().includes(q);
+
+    const byEntity = new Map();
+    const bucket = (entity) => {
+      const key = entity || '';
+      if (!byEntity.has(key)) byEntity.set(key, { entity: key, programs: [], loose: [] });
+      return byEntity.get(key);
+    };
+
+    for (const prog of programs) {
+      const kids = workstreams.filter(w => w.parentId === prog.id);
+      // A program survives the filter if it matches, or if anything under it
+      // does — otherwise typing a workstream name hides the row it lives in.
+      if (!hit(prog.name) && !kids.some(k => hit(k.name))) continue;
+      bucket(prog.entity).programs.push({ prog, kids: kids.filter(k => hit(k.name) || hit(prog.name)) });
+    }
+    for (const w of orphans) {
+      if (!hit(w.name)) continue;
+      bucket(w.entity).loose.push(w);
+    }
+
+    const score = (g) => {
+      const ids = [...g.loose.map(w => w.id), ...g.programs.flatMap(p => p.kids.map(k => k.id))];
+      return ids.reduce((n, id) => n + countsFor(id).total, 0);
+    };
+
+    return [...byEntity.values()]
+      .map(g => ({
+        ...g,
+        // Deals before internal workstreams: a counterparty deal is the thing
+        // you came here to work, and an internal build should not sit above it.
+        loose: g.loose.slice().sort(byKindThenName),
+        participantCount: score(g),
+      }))
+      // Entities with live relationships first, then alphabetically. The
+      // no-entity bucket always sinks — it is the one that needs cleaning up.
+      .sort((a, b) =>
+        (a.entity ? 0 : 1) - (b.entity ? 0 : 1) ||
+        b.participantCount - a.participantCount ||
+        a.entity.localeCompare(b.entity));
+  }, [programs, workstreams, orphans, participations, filter]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [closedEntities, setClosedEntities] = useState(() => new Set());
+  function toggleEntity(entity) {
+    setClosedEntities(prev => {
+      const next = new Set(prev);
+      if (next.has(entity)) next.delete(entity); else next.add(entity);
+      return next;
+    });
+  }
 
   if (!programs.length && !orphans.length) {
     return (
@@ -165,68 +231,122 @@ function Rail({ programs, workstreams, orphans, participations, openPrograms, to
     );
   }
 
+  const total = programs.length + orphans.length;
+
   return (
     <Panel sx={{ padding: '10px 8px' }}>
-      {programs.map(prog => {
-        const kids = workstreams.filter(w => w.parentId === prog.id);
-        const open = openPrograms.has(prog.id);
+      {total > 8 && (
+        <input
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          placeholder="Filter"
+          style={{
+            width: '100%', boxSizing: 'border-box', padding: '6px 9px', marginBottom: 8,
+            borderRadius: 6, border: `1px solid ${C.cr2}`, background: C.bg,
+            color: C.ink9, fontFamily: SANS, fontSize: 12, outline: 'none',
+          }}
+        />
+      )}
+
+      {!groups.length && (
+        <div style={{ fontSize: 11.5, color: C.ink3, padding: '8px' }}>Nothing matches that.</div>
+      )}
+
+      {groups.map(g => {
+        // Filtering is a search: forcing the user to re-open every section to
+        // see their own hits would defeat it.
+        const open = filter.trim() ? true : !closedEntities.has(g.entity);
         return (
-          <div key={prog.id} style={{ marginBottom: 4 }}>
-            <button onClick={() => toggleProgram(prog.id)} style={{
-              display: 'flex', alignItems: 'center', gap: 7, width: '100%',
-              padding: '6px 8px', border: 'none', background: 'transparent',
-              color: C.ink9, fontFamily: SANS, fontSize: 13, fontWeight: 600,
+          <div key={g.entity || '_none'} style={{ marginBottom: 6 }}>
+            <button onClick={() => toggleEntity(g.entity)} style={{
+              display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+              padding: '5px 8px', border: 'none', background: 'transparent',
               cursor: 'pointer', textAlign: 'left', borderRadius: 6,
             }}>
-              <span style={{ color: C.ink3, fontSize: 10, width: 10 }}>{open ? '▾' : '▸'}</span>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {prog.name}
+              <span style={{ color: C.ink2, fontSize: 9, width: 9 }}>{open ? '▾' : '▸'}</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                {g.entity
+                  ? <EntityChip entity={g.entity} />
+                  : <span style={{
+                      fontFamily: MONO, fontSize: 9, letterSpacing: '.1em',
+                      textTransform: 'uppercase', color: C.ink3,
+                    }}>No entity</span>}
               </span>
-              {prog.blockedCount > 0 && (
-                <span style={{ fontFamily: MONO, fontSize: 9, color: C.red }}>{prog.blockedCount}</span>
-              )}
+              <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>
+                {g.programs.length + g.loose.length}
+              </span>
             </button>
 
-            {open && kids.map(w => {
-              const c = countsFor(w.id);
-              return <RailItem key={w.id} ws={w} counts={c} active={active === w.id} onPick={onPick} indent />;
-            })}
-            {open && !kids.length && (
-              <div style={{ fontSize: 11, color: C.ink2, padding: '4px 8px 4px 25px' }}>No workstreams yet</div>
+            {open && (
+              <div style={{ marginTop: 2 }}>
+                {g.programs.map(({ prog, kids }) => {
+                  const progOpen = filter.trim() ? true : openPrograms.has(prog.id);
+                  return (
+                    <div key={prog.id}>
+                      <button onClick={() => toggleProgram(prog.id)} style={{
+                        display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                        padding: '5px 8px 5px 17px', border: 'none', background: 'transparent',
+                        color: C.ink9, fontFamily: SANS, fontSize: 12.5, fontWeight: 600,
+                        cursor: 'pointer', textAlign: 'left', borderRadius: 6,
+                      }}>
+                        <span style={{ color: C.ink2, fontSize: 9, width: 9 }}>{progOpen ? '▾' : '▸'}</span>
+                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {prog.name}
+                        </span>
+                        {prog.blockedCount > 0 && (
+                          <span style={{ fontFamily: MONO, fontSize: 9, color: C.red }}>{prog.blockedCount}</span>
+                        )}
+                      </button>
+                      {progOpen && kids.map(w => (
+                        <RailItem key={w.id} ws={w} counts={countsFor(w.id)} active={active === w.id} onPick={onPick} depth={2} />
+                      ))}
+                      {progOpen && !kids.length && (
+                        <div style={{ fontSize: 11, color: C.ink2, padding: '4px 8px 4px 34px' }}>No workstreams yet</div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {g.loose.map(w => (
+                  <RailItem key={w.id} ws={w} counts={countsFor(w.id)} active={active === w.id} onPick={onPick} depth={1} />
+                ))}
+              </div>
             )}
           </div>
         );
       })}
-
-      {orphans.length > 0 && (
-        <div style={{ marginTop: programs.length ? 8 : 0, paddingTop: programs.length ? 8 : 0, borderTop: programs.length ? `1px solid ${C.cr2}` : 'none' }}>
-          <div style={{
-            fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase',
-            color: C.ink3, padding: '0 8px 5px',
-          }}>
-            {/* With no programs at all the base is flat, and calling every row
-                "Unparented" reads as a fault rather than the normal shape. */}
-            {programs.length ? 'Standalone' : 'Workstreams'}
-          </div>
-          {orphans.map(w => (
-            <RailItem key={w.id} ws={w} counts={countsFor(w.id)} active={active === w.id} onPick={onPick} />
-          ))}
-        </div>
-      )}
     </Panel>
   );
 }
 
-function RailItem({ ws, counts, active, onPick, indent }) {
+// Counterparty deals above internal workstreams, then alphabetical.
+function byKindThenName(a, b) {
+  const rank = k => (String(k || '').toLowerCase() === 'deal' ? 0 : 1);
+  return rank(a.kind) - rank(b.kind) || (a.name || '').localeCompare(b.name || '');
+}
+
+function RailItem({ ws, counts, active, onPick, depth = 0 }) {
+  const isDeal = String(ws.kind || '').toLowerCase() === 'deal';
   return (
     <button onClick={() => onPick(ws.id)} style={{
       display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-      padding: indent ? '5px 8px 5px 25px' : '5px 8px',
+      padding: `5px 8px 5px ${8 + depth * 17}px`,
       border: 'none', borderRadius: 6,
       background: active ? C.accS : 'transparent',
       color: active ? C.ink9 : C.ink5,
       fontFamily: SANS, fontSize: 12, cursor: 'pointer', textAlign: 'left',
     }}>
+      {/* Filled = a deal with an outside party. Hollow = internal work. The
+          distinction is already in the Kind field and is the fastest way to
+          tell a $20M raise from a homepage rebuild at a glance. */}
+      <span
+        title={isDeal ? 'Deal' : 'Internal workstream'}
+        style={{
+          width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+          background: isDeal ? C.ink3 : 'transparent',
+          border: `1px solid ${C.ink3}`,
+        }}
+      />
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {ws.name}
       </span>
