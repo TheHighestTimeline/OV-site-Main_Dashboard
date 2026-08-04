@@ -56,6 +56,18 @@ export const handler = async (event) => {
       opp.parentIds = r.fields['Parent Opportunity'] || [];
       opp.parentId  = opp.parentIds[0] || null;
 
+      // Named links live as JSON text because Airtable has no repeating group.
+      // A hand-edited record can leave malformed JSON here; that must degrade to
+      // "no extra links" rather than take out the whole list endpoint.
+      try {
+        const parsed = JSON.parse(opp.extraLinks || '[]');
+        opp.extraLinks = Array.isArray(parsed)
+          ? parsed.filter(l => l && l.url).map(l => ({ label: l.label || '', url: l.url }))
+          : [];
+      } catch {
+        opp.extraLinks = [];
+      }
+
       // Resolved {id,name} pairs for clickable chips in the UI.
       opp.companies = opp.companyIds.map(id => ({ id, name: companyNameById[id] || '' }));
       opp.contacts  = opp.contactIds.map(id => ({ id, name: contactNameById[id] || '' }));

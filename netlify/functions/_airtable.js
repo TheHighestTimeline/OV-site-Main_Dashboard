@@ -463,6 +463,10 @@ export const OPPORTUNITIES_MAP = {
   // Airtable API cannot edit an existing select's choices, so the board gets a
   // clean field of its own rather than nineteen values aliased into seven.
   lane:           'Lane',
+  dealCost:       'Deal Cost',      // what it costs us, vs dealValue = what it is worth
+  contractsUrl:   'Contracts URL',
+  extraLinks:     'Extra Links',    // JSON array of {label, url}; see the field description
+
   // Where the counterparty paperwork stands on a sub-opportunity. This is the
   // NCNDA tag. Separate from Lane because "In Work" and "NCNDA Signed" are
   // different facts and collapsing them loses one of them.

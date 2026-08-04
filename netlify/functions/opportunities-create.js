@@ -23,7 +23,7 @@ export const handler = async (event) => {
 
   const { name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
           nextStep, dataRoom, priority, kind, otherParty, probability,
-          goal, lane, paperworkStage, parentId,
+          goal, lane, paperworkStage, parentId, dealCost, contractsUrl,
           companyIds, contactIds, projectIds } = body;
   if (!name) return err(400, 'name is required');
 
@@ -34,6 +34,8 @@ export const handler = async (event) => {
     obj.lane = lane || 'Future Plans';
     if (goal)           obj.goal           = goal;
     if (paperworkStage) obj.paperworkStage = paperworkStage;
+    if (contractsUrl)   obj.contractsUrl   = contractsUrl;
+    if (dealCost != null && dealCost !== '') obj.dealCost = Number(dealCost);
     if (dealValue != null && dealValue !== '') obj.dealValue = Number(dealValue);
     if (closeDate)  obj.closeDate = closeDate;
     if (entity)     obj.entity    = entity;

@@ -22,7 +22,7 @@ export const handler = async (event) => {
 
   const { id, name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
           nextStep, dataRoom, priority, kind, otherParty, probability, goal,
-          lane, paperworkStage,
+          lane, paperworkStage, dealCost, contractsUrl, extraLinks,
           companyIds, contactIds, projectIds, parentId } = body;
   if (!id) return err(400, 'id is required');
 
@@ -44,6 +44,17 @@ export const handler = async (event) => {
     // an option named "" and rejects the whole write.
     if (lane           !== undefined) update.lane           = lane || null;
     if (paperworkStage !== undefined) update.paperworkStage = paperworkStage || null;
+    if (dealCost     !== undefined) update.dealCost     = dealCost != null && dealCost !== '' ? Number(dealCost) : null;
+    if (contractsUrl !== undefined) update.contractsUrl = contractsUrl || '';
+    // Stored as JSON text: Airtable has no repeating-group field. Serialised
+    // here so a malformed array can never reach the record.
+    if (extraLinks !== undefined) {
+      update.extraLinks = Array.isArray(extraLinks)
+        ? JSON.stringify(extraLinks
+            .filter(l => l && String(l.url || '').trim())
+            .map(l => ({ label: String(l.label || '').trim().slice(0, 120), url: String(l.url).trim() })))
+        : '';
+    }
     // Airtable percent fields store a 0–1 fraction; the UI works in 0–100.
     if (probability !== undefined) update.probability = probability != null && probability !== '' ? Number(probability) / 100 : null;
     const t = normType(type, kanbanType);

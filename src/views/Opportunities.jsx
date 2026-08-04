@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { C, SERIF, SANS, MONO, stBg, stFg, prBg, prFg, fmtC, fmtD } from '../constants.js';
 import { Eyebrow, Tag, Spinner, Btn, Inp, Sel, FR, useConfirm, Modal, FilterDropdown, SkeletonKanban, EmptyState } from '../components/UI.jsx';
 import { cacheGet, cacheSet } from '../lib/cache.js';
+import HierarchyEditor from './opportunities/HierarchyEditor.jsx';
+import LinksEditor from './opportunities/LinksEditor.jsx';
+import TaskRowEditor from './opportunities/TaskRowEditor.jsx';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
          getAirtableSchema, airtableRecordUrl, getAppState, setAppState } from '../api.js';
@@ -297,7 +300,7 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
 // both editable pickers AND clickable chips that jump into the CRM. The tasks
 // underneath this opportunity sit at the bottom (add / advance / edit / remove,
 // live against the Master Action Board).
-function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList }) {
+function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild, onTasksChanged }) {
   const lane   = canonicalStage(opp.stage, opp.lane);
   const sStyle = STAGE_STYLE[lane] || {};
   const save   = (patch) => onPatch(opp.id, patch);
@@ -307,12 +310,14 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
   const [nextStep,  setNextStep]  = useState(opp.nextStep || opp.nextAction || '');
   const [notes,     setNotes]     = useState(opp.notes || '');
   const [value,     setValue]     = useState(opp.dealValue != null ? String(opp.dealValue) : '');
+  const [cost,      setCost]      = useState(opp.dealCost != null ? String(opp.dealCost) : '');
   const [prob,      setProb]      = useState(opp.probability != null ? String(opp.probability) : '');
   const [otherParty,setOtherParty]= useState(opp.otherParty || '');
   const [dataRoom,  setDataRoom]  = useState(opp.dataRoom || '');
   useEffect(() => {
     setNextStep(opp.nextStep || opp.nextAction || ''); setNotes(opp.notes || '');
     setValue(opp.dealValue != null ? String(opp.dealValue) : '');
+    setCost(opp.dealCost != null ? String(opp.dealCost) : '');
     setProb(opp.probability != null ? String(opp.probability) : '');
     setOtherParty(opp.otherParty || ''); setDataRoom(opp.dataRoom || '');
   }, [opp.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -336,9 +341,21 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       companies:  (opp.companies  || []).filter(x => x.id !== id),
     });
   };
-  const setContact = (id) => {
+  // Multi-select, like companies. A deal routinely has several people on it and
+  // forcing one meant the rest were tracked nowhere.
+  const addContact = (id) => {
+    if (!id || (opp.contactIds || []).includes(id)) return;
     const ct = (contactsList || []).find(c => c.id === id);
-    save({ contactIds: id ? [id] : [], contacts: id ? [{ id, name: ct?.name || '' }] : [] });
+    save({
+      contactIds: [...(opp.contactIds || []), id],
+      contacts:   [...(opp.contacts   || []), { id, name: ct?.name || '' }],
+    });
+  };
+  const removeContact = (id) => {
+    save({
+      contactIds: (opp.contactIds || []).filter(x => x !== id),
+      contacts:   (opp.contacts   || []).filter(x => x.id !== id),
+    });
   };
 
   return (
@@ -349,6 +366,11 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
           {lane}{opp.stage && opp.stage !== lane ? ` · ${opp.stage}` : ''}
         </span>
         {opp.dealValue > 0 && <span style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: C.grn }}>{fmtC(opp.dealValue)}</span>}
+        {opp.dealCost > 0 && (
+          <span title="What this costs us" style={{ fontFamily: MONO, fontSize: 12, fontWeight: 700, color: C.red }}>
+            −{fmtC(opp.dealCost)}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>edits save instantly</span>
       </div>
@@ -404,6 +426,12 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
           <input type="number" value={value} onChange={e => setValue(e.target.value)}
             onBlur={() => { const n = value === '' ? null : parseFloat(value); if (n !== (opp.dealValue ?? null)) save({ dealValue: n }); }}
             placeholder="0" style={inp} />
+        </div>
+        <div>
+          <span style={lbl}>Deal cost ($)</span>
+          <input type="number" value={cost} onChange={e => setCost(e.target.value)}
+            onBlur={() => { const n = cost === '' ? null : parseFloat(cost); if (n !== (opp.dealCost ?? null)) save({ dealCost: n }); }}
+            placeholder="what it costs us" style={inp} />
         </div>
         <div>
           <span style={lbl}>Close date</span>
@@ -468,24 +496,57 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
         </div>
       </div>
 
-      {/* ── Linked CRM contact — chip jumps to the profile, dropdown re-links ── */}
+      {/* ── Linked CRM contacts — chips jump to the profile, dropdown adds ──
+           Multi-select. The picker stays visible after the first one, which is
+           the whole difference from before: a deal usually has several people. */}
       <div style={{ marginBottom: 12 }}>
-        <span style={lbl}>Contact (CRM)</span>
+        <span style={lbl}>Contacts (CRM)</span>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           {(opp.contacts || []).map(ct => (
             <span key={ct.id} style={{ ...chips, background: C.bluS, color: C.blu, border: `1px solid ${C.blu}30`, cursor: 'default' }}>
               <span onClick={() => goContact(ct)} title="Open contact profile" style={{ cursor: 'pointer' }}>◉ {ct.name || 'Contact'} ↗</span>
-              <span onClick={() => setContact('')} title="Unlink contact" style={{ cursor: 'pointer', opacity: .6, marginLeft: 2 }}>×</span>
+              <span onClick={() => removeContact(ct.id)} title="Unlink contact" style={{ cursor: 'pointer', opacity: .6, marginLeft: 2 }}>×</span>
             </span>
           ))}
-          {(opp.contacts || []).length === 0 && (
-            <select value="" onChange={e => setContact(e.target.value)}
-              style={{ ...inp, width: 'auto', padding: '4px 8px', fontSize: 11 }} disabled={!contactsList?.length}>
-              <option value="">{contactsList?.length ? '+ Link contact…' : 'Loading contacts…'}</option>
-              {(contactsList || []).map(c => <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>)}
-            </select>
-          )}
+          <select value="" onChange={e => addContact(e.target.value)}
+            style={{ ...inp, width: 'auto', padding: '4px 8px', fontSize: 11 }} disabled={!contactsList?.length}>
+            <option value="">{contactsList?.length ? '+ Link contact…' : 'Loading contacts…'}</option>
+            {(contactsList || [])
+              .filter(c => !(opp.contactIds || []).includes(c.id))
+              .slice()
+              .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+              .map(c => <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>)}
+          </select>
         </div>
+      </div>
+
+      {/* ── Hierarchy, links, tasks ── */}
+      <HierarchyEditor
+        opp={opp}
+        allOpps={allOpps || []}
+        onSave={(patch, targetId) => onPatch(targetId || opp.id, patch)}
+        onOpen={onOpenOpp}
+        onCreateChild={onCreateChild ? () => onCreateChild(opp) : null}
+      />
+
+      <LinksEditor opp={opp} onSave={save} />
+
+      <div style={{ marginBottom: 12 }}>
+        <span style={lbl}>Tasks · {(opp.tasks || []).length}</span>
+        {!(opp.tasks || []).length && (
+          <div style={{ fontSize: 11.5, color: C.ink3 }}>
+            No tasks linked to this opportunity yet.
+          </div>
+        )}
+        {(opp.tasks || []).map(t => (
+          <TaskRowEditor
+            key={t.id}
+            task={t}
+            opportunities={allOpps || []}
+            onChanged={onTasksChanged}
+            showToast={showToast}
+          />
+        ))}
       </div>
 
       <div style={{ marginBottom: 4 }}>
@@ -1035,6 +1096,9 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
       // Airtable has a dedicated 'Drive Link' field — no need to encode into Notes.
       const { driveLink, kanbanType, ...rest } = data;
       const payload = { ...rest, driveLink: driveLink || '', kanbanType: kanbanType || '' };
+      // Creating a sub-opportunity from inside a parent's popup: the form has no
+      // field for it, so the parent id rides along from the opener.
+      if (!isEdit && initial?.parentId) payload.parentId = initial.parentId;
       try {
         if (isEdit) {
           await updateOpportunity(initial.id, payload);
@@ -1196,6 +1260,10 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               onPatch={patchOpp}
               companiesList={companiesList}
               contactsList={contactsList}
+              allOpps={opps}
+              onOpenOpp={setQuickId}
+              onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
+              onTasksChanged={load}
             />
           );
         })()}
@@ -1285,6 +1353,10 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
             onPatch={patchOpp}
             companiesList={companiesList}
             contactsList={contactsList}
+            allOpps={opps}
+            onOpenOpp={setQuickId}
+            onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
+            onTasksChanged={load}
           />
         );
       })()}

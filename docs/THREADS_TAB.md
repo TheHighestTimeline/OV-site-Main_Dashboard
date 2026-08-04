@@ -815,3 +815,65 @@ the brief continue to read participations unchanged.
   why, rather than half-failing.
 - `entity` is written as `null`, never `''` — Airtable reads an empty string on a
   singleSelect as a request to create an option named `""` and rejects the write.
+
+---
+
+## 22. Opportunity popup: hierarchy, links, tasks, cost (2026-08-04)
+
+### Level is derived, never stored
+
+The Level dropdown reads Epic when `Parent Opportunity` is empty and Story when
+it is set. Switching it does not write a flag — it sets or clears the link. That
+is deliberate: a stored level plus a link is two facts that can disagree, and
+then neither is trustworthy.
+
+Consequences that fall out of the same rule:
+- Picking **Story** holds the choice until you name the parent, rather than
+  writing a half-state. The warning says so.
+- Picking **Epic** clears the parent. Its own children are untouched.
+- **Linking an existing opportunity as a child writes on the child**, because the
+  child is the one gaining a parent — which is exactly what turns it from an epic
+  into a story. Unlinking promotes it back.
+- A story whose parent is missing still renders at the top level. Nothing is ever
+  hidden by a broken link.
+
+Parent is single-select (one deal owns a thread); children are added one at a
+time from a dropdown listing every other opportunity, annotated with where it
+currently sits so a re-parent is a visible act rather than a silent steal.
+
+### Contacts are multi-select
+
+`Associated Contact` was always a `multipleRecordLinks` field; the UI just hid
+the picker once one contact was attached. It now stays visible and filters out
+whoever is already linked. Airtable's `prefersSingleRecordLink` flag on that
+field only affects Airtable's own UI and cannot be changed through the API.
+
+### Links
+
+`Data Room` and `Contracts URL` are real url fields — they are asked for on every
+deal. Everything else is a named pair in `Extra Links`, stored as a JSON array
+because Airtable has no repeating-group field and a column per document would not
+scale. A bare `drive.google.com/…` is normalised to `https://` first, or the
+browser treats it as a relative path. Malformed JSON on the record degrades to
+"no extra links" rather than taking out `opportunities-list`.
+
+### Tasks are fully editable in place
+
+Name, status, priority, due date, and **which opportunity the task belongs to**.
+Re-pointing the link from here is the point: a task filed against the wrong deal
+is something you notice while looking at that deal, and making you leave for the
+Tasks tab is why it never gets fixed. The board reloads after a write, so a task
+moved elsewhere actually leaves the list.
+
+### Deal Cost
+
+New currency field beside Deal Value. A site worth $40M that costs $6M to acquire
+needs both numbers or the pipeline reads as pure upside. The popup header shows
+value in green and cost in red.
+
+### Not done
+
+Converting an opportunity into a **task** — the third level in the dropdown — is
+not built. It is a cross-table move (create on Master Action Board, retire the
+opportunity) and it deletes a record's stage history, so it wants an explicit
+confirm flow rather than a dropdown option that looks like the other two.
