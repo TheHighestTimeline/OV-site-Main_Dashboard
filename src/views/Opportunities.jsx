@@ -86,6 +86,12 @@ const PAPERWORK_STAGES = [
 // record created before the field existed still reads correctly.
 const levelOf = (o) => o?.level || (o?.parentId ? 'Story' : 'Epic');
 
+const hdrBtn = {
+  border: `1px solid ${C.cr3}`, borderRadius: 6, background: 'transparent',
+  color: C.ink5, fontFamily: MONO, fontSize: 9, letterSpacing: '.05em',
+  padding: '3px 8px', cursor: 'pointer', whiteSpace: 'nowrap',
+};
+
 const OPP_PRIORITIES = ['', 'High Priority', 'Medium Priority', 'Low Priority'];
 
 // ── Per-company pipeline lanes (2026-07 audit §3.2) ──────────────────────────
@@ -280,7 +286,7 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null, allOpp
 // both editable pickers AND clickable chips that jump into the CRM. The tasks
 // underneath this opportunity sit at the bottom (add / advance / edit / remove,
 // live against the Master Action Board).
-function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild }) {
+function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild, onDuplicate, onConvertToTask }) {
   const lane   = canonicalStage(opp.stage, opp.lane);
   const sStyle = STAGE_STYLE[lane] || {};
   const save   = (patch) => onPatch(opp.id, patch);
@@ -352,6 +358,12 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {onDuplicate && (
+          <button onClick={() => onDuplicate(opp)} title="Create an editable copy" style={hdrBtn}>⧉ Duplicate</button>
+        )}
+        {onConvertToTask && (
+          <button onClick={() => onConvertToTask(opp)} title="Turn this into a task on the board" style={hdrBtn}>→ Task</button>
+        )}
         <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>edits save instantly</span>
       </div>
 
@@ -973,6 +985,77 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
 
   // Live-edit a single opportunity field: optimistic local update + immediate
   // Airtable write; on failure the toast reports it and a reload restores truth.
+  // ── Duplicate ──────────────────────────────────────────────────────────────
+  // "Copy of …" rather than a silent clone: an exact duplicate sitting next to
+  // the original is impossible to tell apart in a list, and the copy is always
+  // the one you meant to edit. It lands in Future Plans as a story so it has to
+  // be deliberately filed before it shows up as live work.
+  const duplicateOpp = useCallback(async (o) => {
+    try {
+      const created = await createOpportunity({
+        name:      `Copy of ${o.name}`,
+        lane:      'Future Plans',
+        level:     'Story',
+        parentId:  o.parentId || undefined,
+        stage:     o.stage || undefined,
+        entity:    o.entity || undefined,
+        kind:      o.kind || undefined,
+        type:      o.type || undefined,
+        priority:  o.priority || undefined,
+        goal:      o.goal || undefined,
+        notes:     o.notes || undefined,
+        nextStep:  o.nextStep || undefined,
+        dataRoom:  o.dataRoom || undefined,
+        contractsUrl: o.contractsUrl || undefined,
+        dealValue: o.dealValue ?? undefined,
+        dealCost:  o.dealCost ?? undefined,
+        paperworkStage: o.paperworkStage || undefined,
+        companyIds: o.companyIds || [],
+        contactIds: o.contactIds || [],
+      });
+      showToast?.(`Copied to "Copy of ${o.name}"`);
+      await load();
+      setQuickId(created.id);
+    } catch (e) {
+      showToast?.('Duplicate failed: ' + e.message);
+    }
+  }, [showToast, load]);
+
+  // ── Convert to task ────────────────────────────────────────────────────────
+  // A cross-table move, so it asks first and says exactly what it will do. The
+  // opportunity is ARCHIVED, never deleted: its stage history, paperwork rows and
+  // linked documents stay reachable, and a wrong conversion is recoverable by
+  // moving the lane back.
+  const convertToTask = useCallback((o) => {
+    const kids = opps.filter(x => x.parentId === o.id).length;
+    const lines = [
+      `"${o.name}" becomes a task on the Master Action Board.`,
+      o.parentId ? 'The task is linked to its parent opportunity.' : 'The task starts unlinked — pick an opportunity on it afterwards.',
+      'The opportunity is moved to the Archive lane, not deleted, so its history stays.',
+    ];
+    if (kids) lines.push(`⚠ It still has ${kids} sub-opportunit${kids === 1 ? 'y' : 'ies'}, which will be left where they are and will no longer roll up anywhere.`);
+
+    confirm({
+      message: lines.join(' '),
+      confirmLabel: 'Convert to task',
+      onConfirm: async () => {
+        await createTask({
+          task:   o.name,
+          status: 'Not Started',
+          dueDate: o.closeDate || undefined,
+          priority: o.priority || undefined,
+          entity: o.entity || undefined,
+          opportunityIds: o.parentId ? [o.parentId] : [],
+          contactIds: o.contactIds || [],
+        });
+        await updateOpportunity(o.id, { lane: 'Archive' });
+        showToast?.(`"${o.name}" is now a task`);
+        setQuickId(null);
+        load();
+      },
+    });
+  }, [opps, confirm, showToast, load]);
+
   const patchOpp = useCallback(async (id, patch) => {
     setOpps(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
     try {
@@ -1255,6 +1338,8 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               allOpps={opps}
               onOpenOpp={setQuickId}
               onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
+              onDuplicate={duplicateOpp}
+              onConvertToTask={convertToTask}
             />
           );
         })()}
@@ -1347,6 +1432,8 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
             allOpps={opps}
             onOpenOpp={setQuickId}
             onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
+            onDuplicate={duplicateOpp}
+            onConvertToTask={convertToTask}
           />
         );
       })()}
