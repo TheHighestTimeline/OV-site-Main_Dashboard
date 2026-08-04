@@ -371,12 +371,49 @@ function TimelineTab({ c, notes }) {
 // ── NCNDA compliance panel ────────────────────────────────────────────────────
 function CompliancePanel({ c, showToast }) {
   const [docs, setDocs] = useState(null);
-  useEffect(() => { getDocumentsForContact(c.id).then(setDocs).catch(() => setDocs([])); }, [c.id]);
+  const reloadDocs = useCallback(() => {
+    getDocumentsForContact(c.id).then(setDocs).catch(() => setDocs([]));
+  }, [c.id]);
+  useEffect(() => { reloadDocs(); }, [reloadDocs]);
+
+  const [linking,    setLinking]    = useState(null);
+  const [linkUrl,    setLinkUrl]    = useState('');
+  const [linkSigned, setLinkSigned] = useState('');
+  const [linkBusy,   setLinkBusy]   = useState(false);
 
   const entities = c.relatesTo || [];
   if (!entities.length) return null; // no entity relationships → nothing to track
 
   const ncndaFor = e => (docs || []).find(d => d.type === 'NCNDA' && d.entity === e);
+
+  const saveLink = async (entity) => {
+    const url = linkUrl.trim();
+    if (!url) return;
+    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    setLinkBusy(true);
+    try {
+      const existing = ncndaFor(entity);
+      if (existing) {
+        await updateDocument(existing.id, { driveLink: href, signedDate: linkSigned || null });
+      } else {
+        await createDocument({
+          name: `${entity} NCNDA — ${c.name}`,
+          type: 'NCNDA',
+          entity,
+          driveLink: href,
+          signedDate: linkSigned || null,
+          contactIds: [c.id],
+        });
+      }
+      showToast(linkSigned ? 'NCNDA linked and marked signed ✓' : 'NCNDA linked (not signed)');
+      setLinking(null); setLinkUrl(''); setLinkSigned('');
+      reloadDocs?.();
+    } catch (err) {
+      showToast('Could not link: ' + err.message);
+    } finally {
+      setLinkBusy(false);
+    }
+  };
   const sendSignwell = async (e, resend) => {
     if (!c.email) { showToast('This contact has no email on file — add one first'); return; }
     if (!window.confirm(`${resend ? 'Resend' : 'Send'} the ${e} NCNDA to ${c.name} <${c.email}> via SignWell?`)) return;
@@ -402,13 +439,46 @@ function CompliancePanel({ c, showToast }) {
                 ? `${doc.signedDate ? 'Signed ' + fmtR(doc.signedDate) : 'On file'}${doc.expires ? ' · Expires ' + fmtR(doc.expires) + (es?.state === 'soon' ? ` (${es.days}d)` : es?.state === 'expired' ? ' — EXPIRED' : '') : ''}`
                 : 'Not on file'}</div>
             </div>
-            {doc && !warn
-              ? <a href={doc.driveLink} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.06em', textTransform: 'uppercase', color: C.ink3, textDecoration: 'none' }}>View ↗</a>
-              : <Btn v={warn ? 'acc' : 'gho'} onClick={() => sendSignwell(e, warn)}>⚡ {warn ? 'Resend' : 'Send'}</Btn>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              {doc && (
+                <a href={doc.driveLink} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.06em', textTransform: 'uppercase', color: C.ink3, textDecoration: 'none' }}>View ↗</a>
+              )}
+              <button
+                onClick={() => setLinking(linking === e ? null : e)}
+                style={{ border: `1px solid ${C.cr3}`, borderRadius: 6, background: 'transparent', color: C.ink5, fontFamily: MONO, fontSize: 9, letterSpacing: '.05em', padding: '4px 8px', cursor: 'pointer' }}
+              >{doc ? 'Relink' : 'Link URL'}</button>
+              {(!doc || warn) && (
+                <Btn v={warn ? 'acc' : 'gho'} onClick={() => sendSignwell(e, warn)}>⚡ {warn ? 'Resend' : 'Send'}</Btn>
+              )}
+            </div>
           </div>
         );
       })}
-      <div style={{ fontSize: 11, color: C.ink3, marginTop: 2 }}>Auto-derived from “Related to” + linked NCNDA documents. Attach an NCNDA in the Files tab and tag it with the entity to check it here.</div>
+
+      {/* Manual linking. The SignWell path only covers NCNDAs we sent; anything
+          signed before this dashboard existed, or countersigned outside it, has
+          to be attachable by URL or the tracker permanently reads "Not on file"
+          for deals that are actually papered. */}
+      {linking && (
+        <div style={{ padding: '10px 12px', background: C.bg, border: `1px solid ${C.acc}`, borderRadius: 10, marginBottom: 8 }}>
+          <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 6 }}>
+            Link the {linking} NCNDA
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Inp value={linkUrl} onChange={ev => setLinkUrl(ev.target.value)} placeholder="Drive or SignWell URL" sx={{ flex: '1 1 220px', fontSize: 12 }} />
+            <Inp type="date" value={linkSigned} onChange={ev => setLinkSigned(ev.target.value)} sx={{ flex: '0 1 150px', fontSize: 12 }} />
+            <Btn onClick={() => saveLink(linking)} disabled={linkBusy || !linkUrl.trim()}>{linkBusy ? '…' : 'Save'}</Btn>
+            <Btn v="gho" onClick={() => { setLinking(null); setLinkUrl(''); setLinkSigned(''); }}>Cancel</Btn>
+          </div>
+          <div style={{ fontSize: 11, color: C.ink3, marginTop: 6, lineHeight: 1.5 }}>
+            A signed date is what makes it count. Leave it blank to record the document as
+            on file but <strong>not</strong> signed — the stage gate in Threads will still refuse
+            NCNDA Signed until a date is set, which is the point of the gate.
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 11, color: C.ink3, marginTop: 2 }}>Auto-derived from “Related to” + linked NCNDA documents. Attach one in the Files tab, or paste its URL here.</div>
     </Card>
   );
 }
