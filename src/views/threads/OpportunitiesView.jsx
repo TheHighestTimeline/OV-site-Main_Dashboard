@@ -1,23 +1,48 @@
-// View 1: Opportunities. The default.
+// View 1: Opportunities. The default. Three panes, three levels.
 //
-// Left rail is programs as collapsible nodes with their workstreams nested.
-// Selecting a workstream shows its digest, then its participation cards, then
-// the detail for whichever card is picked.
+//   EPIC   the deal            "OVMG X Genesis — Bennettsville $20M Bridge Loan"
+//   STORY  one thread inside it "OVMG X Adam Shore — Loan Solutions"
+//   TASK   work on either
 //
-// This view groups by PARTICIPATION, not by person, because each row here needs
-// a separate action. The People view groups by person. The two groupings are
-// deliberately different and must not be unified: "everything Greg said" and
-// "what needs doing on the bridge loan" are different questions.
+// Left rail is epics, grouped by entity. Centre is that epic's stories — one
+// card per email thread, each with its own paperwork tag and task counts. Right
+// is the detail for whichever story is open: who is on it, where the paperwork
+// stands, the timeline, and its tasks.
+//
+// A STORY IS ONE THREAD, not one person. A two-person email thread is still one
+// thread and must not be split into two cards, which is why a story links a LIST
+// of contacts. The People view is the place that groups by person instead; both
+// groupings are correct for their question and must not be unified.
 
 import { useState, useMemo } from 'react';
 import { C, SERIF, SANS, MONO } from '../../constants.js';
 import { Modal } from '../../components/UI.jsx';
-import {
-  StageBadge, EntityChip, WorkstreamChip, WaitingPill, UrgencyDot, urgencyOf,
-  Panel, Empty, fmtRel,
-} from './shared.jsx';
-import DetailPane from './DetailPane.jsx';
-import AddParticipant from './AddParticipant.jsx';
+import { EntityChip, Panel, Empty, fmtRel } from './shared.jsx';
+import StoryDetail from './StoryDetail.jsx';
+import StoryForm from './StoryForm.jsx';
+
+const LANES = ['Future Plans', 'Submitted', 'In Work', 'Waiting On', 'Closing', 'Done', 'Archive'];
+const LANE_RANK = Object.fromEntries(LANES.map((l, i) => [l, i]));
+const DONE_LANES = new Set(['Done', 'Archive']);
+
+const LANE_COLOR = {
+  'Future Plans': () => C.ink3,
+  'Submitted':    () => C.blu,
+  'In Work':      () => C.acc,
+  'Waiting On':   () => C.yel,
+  'Closing':      () => C.pur || C.blu,
+  'Done':         () => C.grn,
+  'Archive':      () => C.ink2,
+};
+
+// Paperwork tags. Signed and Closed read green because "have they signed" is
+// the single most asked question about any of these threads.
+const PAPERWORK_COLOR = {
+  'NCNDA Signed': () => C.grn,
+  'Closed':       () => C.grn,
+  'NCNDA Sent':   () => C.yel,
+  'Stalled':      () => C.red,
+};
 
 const addBtn = {
   padding: '7px 14px', borderRadius: 999, border: 'none', background: C.acc,
@@ -28,214 +53,151 @@ const addBtn = {
 export default function OpportunitiesView({
   data, selected, onSelect, onChanged, showToast, isMobile,
 }) {
-  const { programs = [], workstreams = [], participations = [], contacts = [] } = data || {};
-  const [openPrograms, setOpenPrograms] = useState(() => new Set(programs.slice(0, 2).map(p => p.id)));
-  const [activeWorkstream, setActiveWorkstream] = useState(null);
-  const [adding, setAdding] = useState(false);
+  const { epics = [], stories = [], contacts = [] } = data || {};
+  const [activeEpic, setActiveEpic] = useState(null);
+  const [addingStory, setAddingStory] = useState(false);
+  const [editingStory, setEditingStory] = useState(null);
+  const [showDone, setShowDone] = useState(false);
 
-  // Workstreams whose parent program is missing or unset still need a home, or
-  // they silently vanish from the only view that lists them.
-  const orphanWorkstreams = useMemo(
-    () => workstreams.filter(w => !w.parentId || !programs.some(p => p.id === w.parentId)),
-    [workstreams, programs],
+  const epic = activeEpic ? epics.find(e => e.id === activeEpic) : null;
+
+  const children = useMemo(() => {
+    const kids = stories.filter(s => s.parentId === activeEpic);
+    const visible = showDone ? kids : kids.filter(s => !DONE_LANES.has(s.lane));
+    return visible.slice().sort(byLaneThenUrgency);
+  }, [stories, activeEpic, showDone]);
+
+  const hiddenDone = useMemo(
+    () => stories.filter(s => s.parentId === activeEpic && DONE_LANES.has(s.lane)).length,
+    [stories, activeEpic],
   );
 
-  const ws = activeWorkstream ? workstreams.find(w => w.id === activeWorkstream) : null;
-  const members = useMemo(
-    () => participations
-      .filter(p => p.workstreamId === activeWorkstream)
-      .sort(byUrgencyThenStage),
-    [participations, activeWorkstream],
-  );
+  const story = selected ? stories.find(s => s.id === selected) : null;
 
-  const selectedP = selected ? participations.find(p => p.id === selected) : null;
-
-  function toggleProgram(id) {
-    setOpenPrograms(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
-
-  const addModal = adding && ws && (
-    <Modal title={`Add someone to ${ws.name}`} onClose={() => setAdding(false)}>
-      <AddParticipant
-        workstream={ws}
+  const storyModal = (addingStory || editingStory) && (
+    <Modal
+      title={editingStory ? editingStory.name : `New sub-opportunity under ${epic?.name || ''}`}
+      onClose={() => { setAddingStory(false); setEditingStory(null); }}
+    >
+      <StoryForm
+        story={editingStory}
+        parent={epic}
         contacts={contacts}
-        takenIds={members.map(m => m.contactId).filter(Boolean)}
-        onClose={() => setAdding(false)}
+        onClose={() => { setAddingStory(false); setEditingStory(null); }}
         onDone={onChanged}
         showToast={showToast}
       />
     </Modal>
   );
 
-  // ── Mobile: a three-level drill-down stack ─────────────────────────────────
+  // ── Mobile: drill down epic → story → detail ───────────────────────────────
   if (isMobile) {
-    if (selectedP) {
+    if (story) {
       return (
-        <DetailPane
-          participation={selectedP} contacts={contacts} onChanged={onChanged}
-          showToast={showToast} onClose={() => onSelect(null)} isMobile
-        />
+        <>
+          <StoryDetail
+            story={story} contacts={contacts} onChanged={onChanged} showToast={showToast}
+            onClose={() => onSelect(null)} onEdit={() => setEditingStory(story)} isMobile
+          />
+          {storyModal}
+        </>
       );
     }
-    if (ws) {
+    if (epic) {
       return (
         <div>
-          <BackButton label={ws.name} onClick={() => setActiveWorkstream(null)} />
-          <WorkstreamDigest workstream={ws} onAdd={() => setAdding(true)} />
-          <CardList members={members} onSelect={onSelect} onAdd={() => setAdding(true)} />
-          {addModal}
+          <BackButton label={epic.name} onClick={() => setActiveEpic(null)} />
+          <EpicDigest epic={epic} onAdd={() => setAddingStory(true)} />
+          <StoryList
+            stories={children} onSelect={onSelect} onAdd={() => setAddingStory(true)}
+            hiddenDone={hiddenDone} showDone={showDone} onToggleDone={() => setShowDone(v => !v)}
+          />
+          {storyModal}
         </div>
       );
     }
-    return (
-      <Rail
-        programs={programs} workstreams={workstreams} orphans={orphanWorkstreams}
-        participations={participations}
-        openPrograms={openPrograms} toggleProgram={toggleProgram}
-        active={activeWorkstream} onPick={setActiveWorkstream}
-      />
-    );
+    return <Rail epics={epics} active={activeEpic} onPick={setActiveEpic} />;
   }
 
-  // ── Desktop: rail, list, detail ────────────────────────────────────────────
+  // ── Desktop: rail, stories, detail ─────────────────────────────────────────
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '250px minmax(300px, 1fr) minmax(340px, 1.15fr)', gap: 16, alignItems: 'start' }}>
       <div style={{ position: 'sticky', top: 0 }}>
-        <Rail
-          programs={programs} workstreams={workstreams} orphans={orphanWorkstreams}
-          participations={participations}
-          openPrograms={openPrograms} toggleProgram={toggleProgram}
-          active={activeWorkstream} onPick={id => { setActiveWorkstream(id); onSelect(null); }}
-        />
+        <Rail epics={epics} active={activeEpic} onPick={id => { setActiveEpic(id); onSelect(null); }} />
       </div>
 
       <div>
-        {!ws && (
+        {!epic && (
           <Empty
             icon="▤"
-            title="Pick a workstream"
-            body="Programs are the umbrella. Workstreams are where counterparties and stages live."
+            title="Pick an opportunity"
+            body="An opportunity is the deal. Inside it, each sub-opportunity is one thread with one company — where the paperwork, the timeline and the tasks live."
           />
         )}
-        {ws && (
+        {epic && (
           <>
-            <WorkstreamDigest workstream={ws} onAdd={() => setAdding(true)} />
-            <CardList members={members} selected={selected} onSelect={onSelect} onAdd={() => setAdding(true)} />
+            <EpicDigest epic={epic} onAdd={() => setAddingStory(true)} />
+            <StoryList
+              stories={children} selected={selected} onSelect={onSelect}
+              onAdd={() => setAddingStory(true)}
+              hiddenDone={hiddenDone} showDone={showDone} onToggleDone={() => setShowDone(v => !v)}
+            />
           </>
         )}
       </div>
 
       <div style={{ position: 'sticky', top: 0, maxHeight: 'calc(100vh - 160px)', overflow: 'hidden' }}>
         <Panel sx={{ height: 'calc(100vh - 170px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <DetailPane
-            participation={selectedP} contacts={contacts}
-            onChanged={onChanged} showToast={showToast}
+          <StoryDetail
+            story={story} contacts={contacts} onChanged={onChanged}
+            showToast={showToast} onEdit={() => story && setEditingStory(story)}
           />
         </Panel>
       </div>
 
-      {addModal}
+      {storyModal}
     </div>
   );
 }
 
-// ── Left rail ────────────────────────────────────────────────────────────────
-//
-// GROUPED BY ENTITY, not by program. Forty opportunities in one flat list is a
-// dump you scroll rather than a rail you navigate, and the program level cannot
-// carry the grouping on its own because Parent Opportunity is empty across the
-// whole base. Entity is set on 39 of 40 and maps to how the business is actually
-// divided, so it is the axis that organises the rail today.
-//
-// Programs still nest inside their entity the moment any exist. The tree is
-// Entity → Program → Workstream, and it collapses to Entity → Workstream while
-// nothing is parented, which is the state the base is in.
+// ── Left rail: epics grouped by entity ───────────────────────────────────────
 
-function Rail({ programs, workstreams, orphans, participations, openPrograms, toggleProgram, active, onPick }) {
+function Rail({ epics, active, onPick }) {
   const [filter, setFilter] = useState('');
+  const [closed, setClosed] = useState(() => new Set());
 
-  const countsFor = (wsId) => {
-    const members = participations.filter(p => p.workstreamId === wsId);
-    return {
-      total: members.length,
-      blocked: members.filter(p => p.waitingOn === 'Us' || p.blockingItem).length,
-    };
-  };
-
-  // Entity buckets, each holding its programs and its unparented workstreams.
   const groups = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const hit = (name) => !q || String(name || '').toLowerCase().includes(q);
-
     const byEntity = new Map();
-    const bucket = (entity) => {
-      const key = entity || '';
-      if (!byEntity.has(key)) byEntity.set(key, { entity: key, programs: [], loose: [] });
-      return byEntity.get(key);
-    };
-
-    for (const prog of programs) {
-      const kids = workstreams.filter(w => w.parentId === prog.id);
-      // A program survives the filter if it matches, or if anything under it
-      // does — otherwise typing a workstream name hides the row it lives in.
-      if (!hit(prog.name) && !kids.some(k => hit(k.name))) continue;
-      bucket(prog.entity).programs.push({ prog, kids: kids.filter(k => hit(k.name) || hit(prog.name)) });
+    for (const e of epics) {
+      if (q && !String(e.name || '').toLowerCase().includes(q)) continue;
+      const key = e.entity || '';
+      if (!byEntity.has(key)) byEntity.set(key, { entity: key, items: [] });
+      byEntity.get(key).items.push(e);
     }
-    for (const w of orphans) {
-      if (!hit(w.name)) continue;
-      bucket(w.entity).loose.push(w);
-    }
-
-    const score = (g) => {
-      const ids = [...g.loose.map(w => w.id), ...g.programs.flatMap(p => p.kids.map(k => k.id))];
-      return ids.reduce((n, id) => n + countsFor(id).total, 0);
-    };
-
     return [...byEntity.values()]
-      .map(g => ({
-        ...g,
-        // Deals before internal workstreams: a counterparty deal is the thing
-        // you came here to work, and an internal build should not sit above it.
-        loose: g.loose.slice().sort(byKindThenName),
-        participantCount: score(g),
-      }))
-      // Entities with live relationships first, then alphabetically. The
-      // no-entity bucket always sinks — it is the one that needs cleaning up.
+      .map(g => ({ ...g, items: g.items.slice().sort(byKindThenName) }))
+      // The no-entity bucket always sinks; it is the one that needs cleaning up.
       .sort((a, b) =>
         (a.entity ? 0 : 1) - (b.entity ? 0 : 1) ||
-        b.participantCount - a.participantCount ||
+        b.items.length - a.items.length ||
         a.entity.localeCompare(b.entity));
-  }, [programs, workstreams, orphans, participations, filter]);   // eslint-disable-line react-hooks/exhaustive-deps
+  }, [epics, filter]);
 
-  const [closedEntities, setClosedEntities] = useState(() => new Set());
-  function toggleEntity(entity) {
-    setClosedEntities(prev => {
-      const next = new Set(prev);
-      if (next.has(entity)) next.delete(entity); else next.add(entity);
-      return next;
-    });
-  }
-
-  if (!programs.length && !orphans.length) {
+  if (!epics.length) {
     return (
       <Panel>
         <div style={{ fontSize: 12, color: C.ink3, lineHeight: 1.6 }}>
-          No opportunities yet. A program is an Opportunity with no Parent Opportunity;
-          a workstream sets one.
+          No opportunities yet. Create one on the Opportunities tab; anything with no
+          Parent Opportunity shows up here as a top-level deal.
         </div>
       </Panel>
     );
   }
 
-  const total = programs.length + orphans.length;
-
   return (
     <Panel sx={{ padding: '10px 8px' }}>
-      {total > 8 && (
+      {epics.length > 8 && (
         <input
           value={filter}
           onChange={e => setFilter(e.target.value)}
@@ -253,16 +215,23 @@ function Rail({ programs, workstreams, orphans, participations, openPrograms, to
       )}
 
       {groups.map(g => {
-        // Filtering is a search: forcing the user to re-open every section to
+        // Filtering is a search; forcing the user to re-open collapsed groups to
         // see their own hits would defeat it.
-        const open = filter.trim() ? true : !closedEntities.has(g.entity);
+        const open = filter.trim() ? true : !closed.has(g.entity);
         return (
           <div key={g.entity || '_none'} style={{ marginBottom: 6 }}>
-            <button onClick={() => toggleEntity(g.entity)} style={{
-              display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-              padding: '5px 8px', border: 'none', background: 'transparent',
-              cursor: 'pointer', textAlign: 'left', borderRadius: 6,
-            }}>
+            <button
+              onClick={() => setClosed(prev => {
+                const next = new Set(prev);
+                if (next.has(g.entity)) next.delete(g.entity); else next.add(g.entity);
+                return next;
+              })}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                padding: '5px 8px', border: 'none', background: 'transparent',
+                cursor: 'pointer', textAlign: 'left', borderRadius: 6,
+              }}
+            >
               <span style={{ color: C.ink2, fontSize: 9, width: 9 }}>{open ? '▾' : '▸'}</span>
               <span style={{ flex: 1, minWidth: 0 }}>
                 {g.entity
@@ -272,46 +241,36 @@ function Rail({ programs, workstreams, orphans, participations, openPrograms, to
                       textTransform: 'uppercase', color: C.ink3,
                     }}>No entity</span>}
               </span>
-              <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>
-                {g.programs.length + g.loose.length}
-              </span>
+              <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>{g.items.length}</span>
             </button>
 
-            {open && (
-              <div style={{ marginTop: 2 }}>
-                {g.programs.map(({ prog, kids }) => {
-                  const progOpen = filter.trim() ? true : openPrograms.has(prog.id);
-                  return (
-                    <div key={prog.id}>
-                      <button onClick={() => toggleProgram(prog.id)} style={{
-                        display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-                        padding: '5px 8px 5px 17px', border: 'none', background: 'transparent',
-                        color: C.ink9, fontFamily: SANS, fontSize: 12.5, fontWeight: 600,
-                        cursor: 'pointer', textAlign: 'left', borderRadius: 6,
-                      }}>
-                        <span style={{ color: C.ink2, fontSize: 9, width: 9 }}>{progOpen ? '▾' : '▸'}</span>
-                        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {prog.name}
-                        </span>
-                        {prog.blockedCount > 0 && (
-                          <span style={{ fontFamily: MONO, fontSize: 9, color: C.red }}>{prog.blockedCount}</span>
-                        )}
-                      </button>
-                      {progOpen && kids.map(w => (
-                        <RailItem key={w.id} ws={w} counts={countsFor(w.id)} active={active === w.id} onPick={onPick} depth={2} />
-                      ))}
-                      {progOpen && !kids.length && (
-                        <div style={{ fontSize: 11, color: C.ink2, padding: '4px 8px 4px 34px' }}>No workstreams yet</div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                {g.loose.map(w => (
-                  <RailItem key={w.id} ws={w} counts={countsFor(w.id)} active={active === w.id} onPick={onPick} depth={1} />
-                ))}
-              </div>
-            )}
+            {open && g.items.map(e => (
+              <button key={e.id} onClick={() => onPick(e.id)} style={{
+                display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                padding: '5px 8px 5px 25px', border: 'none', borderRadius: 6,
+                background: active === e.id ? C.accS : 'transparent',
+                color: active === e.id ? C.ink9 : C.ink5,
+                fontFamily: SANS, fontSize: 12, cursor: 'pointer', textAlign: 'left',
+              }}>
+                {/* Filled = a deal with an outside party, hollow = internal work.
+                    Read off the existing Kind field. */}
+                <span
+                  title={String(e.kind || '').toLowerCase() === 'deal' ? 'Deal' : 'Internal workstream'}
+                  style={{
+                    width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+                    background: String(e.kind || '').toLowerCase() === 'deal' ? C.ink3 : 'transparent',
+                    border: `1px solid ${C.ink3}`,
+                  }}
+                />
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {e.name}
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, flexShrink: 0 }}>
+                  {e.storyCount || 0}
+                  {e.overdueTaskCount > 0 && <span style={{ color: C.red }}> · {e.overdueTaskCount}</span>}
+                </span>
+              </button>
+            ))}
           </div>
         );
       })}
@@ -319,92 +278,46 @@ function Rail({ programs, workstreams, orphans, participations, openPrograms, to
   );
 }
 
-// Counterparty deals above internal workstreams, then alphabetical.
-function byKindThenName(a, b) {
-  const rank = k => (String(k || '').toLowerCase() === 'deal' ? 0 : 1);
-  return rank(a.kind) - rank(b.kind) || (a.name || '').localeCompare(b.name || '');
-}
+// ── Epic digest ──────────────────────────────────────────────────────────────
 
-function RailItem({ ws, counts, active, onPick, depth = 0 }) {
-  const isDeal = String(ws.kind || '').toLowerCase() === 'deal';
-  return (
-    <button onClick={() => onPick(ws.id)} style={{
-      display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-      padding: `5px 8px 5px ${8 + depth * 17}px`,
-      border: 'none', borderRadius: 6,
-      background: active ? C.accS : 'transparent',
-      color: active ? C.ink9 : C.ink5,
-      fontFamily: SANS, fontSize: 12, cursor: 'pointer', textAlign: 'left',
-    }}>
-      {/* Filled = a deal with an outside party. Hollow = internal work. The
-          distinction is already in the Kind field and is the fastest way to
-          tell a $20M raise from a homepage rebuild at a glance. */}
-      <span
-        title={isDeal ? 'Deal' : 'Internal workstream'}
-        style={{
-          width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
-          background: isDeal ? C.ink3 : 'transparent',
-          border: `1px solid ${C.ink3}`,
-        }}
-      />
-      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {ws.name}
-      </span>
-      <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, flexShrink: 0 }}>
-        {counts.total}
-        {counts.blocked > 0 && <span style={{ color: C.red }}> · {counts.blocked}</span>}
-      </span>
-    </button>
-  );
-}
+function EpicDigest({ epic: e, onAdd }) {
+  const laneEntries = Object.entries(e.laneCounts || {})
+    .sort((a, b) => (LANE_RANK[a[0]] ?? 99) - (LANE_RANK[b[0]] ?? 99));
 
-// ── Workstream digest ────────────────────────────────────────────────────────
-
-function WorkstreamDigest({ workstream: w, onAdd }) {
-  const stageEntries = Object.entries(w.stageCounts || {});
   return (
     <Panel sx={{ marginBottom: 12 }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 180 }}>
           <h3 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 18, color: C.ink9, margin: 0 }}>
-            {w.name}
+            {e.name}
           </h3>
-          {w.goal && <p style={{ fontSize: 12.5, color: C.ink3, margin: '4px 0 0', lineHeight: 1.5 }}>{w.goal}</p>}
+          {e.goal && <p style={{ fontSize: 12.5, color: C.ink3, margin: '4px 0 0', lineHeight: 1.5 }}>{e.goal}</p>}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <EntityChip entity={w.entity} />
-          {onAdd && <button onClick={onAdd} style={addBtn}>＋ Add participant</button>}
+          <EntityChip entity={e.entity} />
+          <button onClick={onAdd} style={addBtn}>＋ Sub-opportunity</button>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10 }}>
-        <Stat label="Participants" value={w.participantCount || 0} />
-        <Stat label="Blocked"  value={w.blockedCount || 0} alert={w.blockedCount > 0} />
-        <Stat label="Stalled"  value={w.stalledCount || 0} alert={w.stalledCount > 0} />
-        <Stat label="Last activity" value={fmtRel(w.lastActivityAt)} />
+        <Stat label="Threads"     value={e.storyCount || 0} />
+        <Stat label="People"      value={e.contactCount || 0} />
+        <Stat label="NCNDA signed" value={e.signedCount || 0} />
+        <Stat label="Overdue"     value={e.overdueTaskCount || 0} alert={e.overdueTaskCount > 0} />
+        <Stat label="Last activity" value={fmtRel(e.lastActivityAt)} />
       </div>
 
-      {stageEntries.length > 0 && (
+      {laneEntries.length > 0 && (
         <div style={{ marginTop: 10, display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {stageEntries.map(([label, n]) => (
-            <span key={label} style={{
-              fontFamily: MONO, fontSize: 9.5, padding: '2px 8px', borderRadius: 999,
-              background: C.grS, color: C.ink5,
-            }}>{label} · {n}</span>
-          ))}
-        </div>
-      )}
-
-      {!w.goal && (
-        // The sprawl rule made visible: a workstream without a goal is a task
-        // wearing a costume, and the create path refuses new participations on it.
-        <div style={{
-          marginTop: 10, padding: '7px 10px', borderRadius: 6,
-          background: C.yelS, color: C.yel, fontSize: 11.5, lineHeight: 1.5,
-        }}>
-          No Goal set. A workstream needs its own goal and its own counterparties,
-          otherwise it belongs on the board as a task. Add participant will ask for
-          the goal and save it with the first person.
+          {laneEntries.map(([lane, n]) => {
+            const col = (LANE_COLOR[lane] || (() => C.ink3))();
+            return (
+              <span key={lane} style={{
+                fontFamily: MONO, fontSize: 9.5, padding: '2px 8px', borderRadius: 999,
+                background: `${col}1f`, color: col, border: `1px solid ${col}44`,
+              }}>{lane} · {n}</span>
+            );
+          })}
         </div>
       )}
     </Panel>
@@ -426,30 +339,49 @@ function Stat({ label, value, alert }) {
   );
 }
 
-// ── Participation cards ──────────────────────────────────────────────────────
+// ── Story cards ──────────────────────────────────────────────────────────────
 
-function CardList({ members, selected, onSelect, onAdd }) {
-  if (!members.length) {
+function StoryList({ stories, selected, onSelect, onAdd, hiddenDone, showDone, onToggleDone }) {
+  if (!stories.length) {
     return (
-      <Empty
-        icon="◉"
-        title="No participants yet"
-        body="A participation is one contact inside this workstream. It carries their stage, which is why the same person can sit at different stages in two workstreams at once."
-        action={onAdd && <button onClick={onAdd} style={addBtn}>＋ Add the first participant</button>}
-      />
+      <>
+        <Empty
+          icon="◉"
+          title={hiddenDone && !showDone ? 'Nothing open here' : 'No sub-opportunities yet'}
+          body="A sub-opportunity is one thread: one company, the people on that email, its own paperwork stage and its own tasks. This is the level you actually work."
+          action={<button onClick={onAdd} style={addBtn}>＋ Add the first sub-opportunity</button>}
+        />
+        {hiddenDone > 0 && <DoneToggle n={hiddenDone} showDone={showDone} onToggle={onToggleDone} />}
+      </>
     );
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {members.map(p => (
-        <ParticipationCard key={p.id} p={p} active={selected === p.id} onClick={() => onSelect(p.id)} />
+      {stories.map(s => (
+        <StoryCard key={s.id} s={s} active={selected === s.id} onClick={() => onSelect(s.id)} />
       ))}
+      {hiddenDone > 0 && <DoneToggle n={hiddenDone} showDone={showDone} onToggle={onToggleDone} />}
     </div>
   );
 }
 
-export function ParticipationCard({ p, active, onClick }) {
-  const urgency = urgencyOf(p);
+function DoneToggle({ n, showDone, onToggle }) {
+  return (
+    <button onClick={onToggle} style={{
+      alignSelf: 'flex-start', marginTop: 4, padding: '5px 11px', borderRadius: 6,
+      border: `1px solid ${C.cr3}`, background: 'transparent', color: C.ink3,
+      fontFamily: MONO, fontSize: 9.5, letterSpacing: '.05em', cursor: 'pointer',
+    }}>
+      {showDone ? `hide ${n} done / archived` : `show ${n} done / archived`}
+    </button>
+  );
+}
+
+function StoryCard({ s, active, onClick }) {
+  const laneCol = (LANE_COLOR[s.lane] || (() => C.ink3))();
+  const pwCol   = (PAPERWORK_COLOR[s.paperworkStage] || (() => C.ink3))();
+  const people  = s.contacts || [];
+
   return (
     <button onClick={onClick} style={{
       display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
@@ -459,31 +391,42 @@ export function ParticipationCard({ p, active, onClick }) {
     }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: C.ink9, lineHeight: 1.2 }}>
-            {p.contactName || p.name}
+          <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: C.ink9, lineHeight: 1.25 }}>
+            {s.name}
           </div>
-          {p.contactCompany && (
-            <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 1 }}>{p.contactCompany}</div>
+          {people.length > 0 && (
+            <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 2 }}>
+              {people.map(p => p.name).filter(Boolean).join(', ')}
+            </div>
           )}
         </div>
-        <UrgencyDot urgency={urgency} />
+        {s.overdueTaskCount > 0 && (
+          <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.red, flexShrink: 0 }}>
+            {s.overdueTaskCount} overdue
+          </span>
+        )}
       </div>
 
-      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
-        <WorkstreamChip name={p.workstreamName} />
-        <EntityChip entity={p.entity} />
-        <WaitingPill waitingOn={p.waitingOn} />
-      </div>
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 8, alignItems: 'center' }}>
+        <span style={{
+          fontFamily: MONO, fontSize: 9, letterSpacing: '.05em', textTransform: 'uppercase',
+          padding: '2px 8px', borderRadius: 999,
+          background: `${laneCol}1f`, color: laneCol, border: `1px solid ${laneCol}55`,
+        }}>{s.lane || 'No lane'}</span>
 
-      <div style={{ marginTop: 7 }}>
-        <StageBadge stageLabel={p.stageLabel} daysInStage={p.daysInStage} slaStatus={p.slaStatus} compact />
-      </div>
+        {s.paperworkStage && (
+          <span style={{
+            fontFamily: MONO, fontSize: 9, letterSpacing: '.05em', textTransform: 'uppercase',
+            padding: '2px 8px', borderRadius: 999,
+            background: `${pwCol}1f`, color: pwCol, border: `1px solid ${pwCol}55`,
+          }}>{s.paperworkStage}</span>
+        )}
 
-      {p.overdueTaskCount > 0 && (
-        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.red, marginTop: 5 }}>
-          {p.overdueTaskCount} overdue task{p.overdueTaskCount > 1 ? 's' : ''}
-        </div>
-      )}
+        <span style={{ flex: 1 }} />
+        <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>
+          {s.openTaskCount || 0} open · {fmtRel(s.lastActivityAt)}
+        </span>
+      </div>
     </button>
   );
 }
@@ -500,12 +443,22 @@ function BackButton({ label, onClick }) {
   );
 }
 
-// Most urgent first, then furthest behind SLA, then terminal rows last.
-function byUrgencyThenStage(a, b) {
-  const rank = { overdue: 3, today: 2, inbound: 1 };
-  if (a.terminal !== b.terminal) return a.terminal ? 1 : -1;
-  const ua = rank[urgencyOf(a)] || 0;
-  const ub = rank[urgencyOf(b)] || 0;
-  if (ua !== ub) return ub - ua;
-  return (b.daysInStage || 0) - (a.daysInStage || 0);
+// ── Sorting ──────────────────────────────────────────────────────────────────
+
+// Counterparty deals above internal workstreams, then alphabetical.
+function byKindThenName(a, b) {
+  const rank = k => (String(k || '').toLowerCase() === 'deal' ? 0 : 1);
+  return rank(a.kind) - rank(b.kind) || (a.name || '').localeCompare(b.name || '');
+}
+
+// Board order, then overdue work first inside a lane. Overdue outranks recency
+// because the point of the centre pane is deciding what to do next.
+function byLaneThenUrgency(a, b) {
+  const la = LANE_RANK[a.lane] ?? 99;
+  const lb = LANE_RANK[b.lane] ?? 99;
+  if (la !== lb) return la - lb;
+  if ((b.overdueTaskCount || 0) !== (a.overdueTaskCount || 0)) {
+    return (b.overdueTaskCount || 0) - (a.overdueTaskCount || 0);
+  }
+  return (a.name || '').localeCompare(b.name || '');
 }

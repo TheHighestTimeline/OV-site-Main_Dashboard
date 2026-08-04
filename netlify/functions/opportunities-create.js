@@ -23,11 +23,17 @@ export const handler = async (event) => {
 
   const { name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
           nextStep, dataRoom, priority, kind, otherParty, probability,
+          goal, lane, paperworkStage, parentId,
           companyIds, contactIds, projectIds } = body;
   if (!name) return err(400, 'name is required');
 
   try {
     const obj = { name, stage: stage || 'Lead', notes: notes || '' };
+    // A new card lands in Future Plans unless told otherwise: something nobody
+    // has decided to work yet is exactly what that lane is for.
+    obj.lane = lane || 'Future Plans';
+    if (goal)           obj.goal           = goal;
+    if (paperworkStage) obj.paperworkStage = paperworkStage;
     if (dealValue != null && dealValue !== '') obj.dealValue = Number(dealValue);
     if (closeDate)  obj.closeDate = closeDate;
     if (entity)     obj.entity    = entity;
@@ -45,6 +51,8 @@ export const handler = async (event) => {
     if (Array.isArray(companyIds) && companyIds.length) fields['Companies']          = companyIds;
     if (Array.isArray(contactIds) && contactIds.length) fields['Associated Contact'] = contactIds;
     if (Array.isArray(projectIds) && projectIds.length) fields['Projects']           = projectIds;
+    // Self-link. Set = this is a sub-opportunity nested under `parentId`.
+    if (parentId) fields['Parent Opportunity'] = [parentId];
 
     const record = await airtableCreate(TABLE(), fields);
     return ok({ id: record.id, name });

@@ -45,7 +45,12 @@ const addBtn = {
 };
 
 export default function PeopleView({ data, selected, onSelect, onChanged, showToast, isMobile }) {
-  const { participations = [], contacts = [], workstreams = [] } = data || {};
+  const { participations = [], contacts = [], workstreams = [], stories = [] } = data || {};
+
+  // Once sub-opportunities exist they are the right place to put a person: a
+  // story is one thread, and that is the level paperwork and tasks live at.
+  // Falls back to the flat list while nothing has been broken down yet.
+  const placeableTargets = stories.length ? stories : workstreams;
   const [sort,   setSort]   = useState('due');
   const [scope,  setScope]  = useState('all');
   const [search, setSearch] = useState('');
@@ -231,7 +236,7 @@ export default function PeopleView({ data, selected, onSelect, onChanged, showTo
     <Modal title={`Add ${addingFor.name || 'this person'} to a workstream`} onClose={() => setAddingFor(null)}>
       <AddParticipant
         contact={addingFor}
-        workstreams={workstreams}
+        workstreams={placeableTargets}
         // Workstreams this person is already in cannot take them again, and the
         // server would refuse the duplicate anyway.
         takenIds={addingFor.participations.map(p => p.workstreamId).filter(Boolean)}

@@ -51,6 +51,11 @@ export const handler = async (event) => {
       opp.projectIds = r.fields['Projects']           || [];
       opp.contactIds = r.fields['Associated Contact'] || [];
 
+      // Self-link hierarchy. Empty parent = a top-level opportunity; set = a
+      // sub-opportunity (one thread with one company or person) nested under it.
+      opp.parentIds = r.fields['Parent Opportunity'] || [];
+      opp.parentId  = opp.parentIds[0] || null;
+
       // Resolved {id,name} pairs for clickable chips in the UI.
       opp.companies = opp.companyIds.map(id => ({ id, name: companyNameById[id] || '' }));
       opp.contacts  = opp.contactIds.map(id => ({ id, name: contactNameById[id] || '' }));

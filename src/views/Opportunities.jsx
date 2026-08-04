@@ -16,49 +16,68 @@ import useIsMobile from '../hooks/useIsMobile.js';
 // Notion is the single source of truth; creates/edits/deletes write there.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// The six canonical pipeline lanes (kanban columns).
+// ── The seven kanban columns ─────────────────────────────────────────────────
+//
+// These read off the `Lane` field, NOT the legacy `Stage` select. Stage carries
+// 19 historical options and the Airtable API cannot edit an existing select's
+// choices, so aliasing nineteen values into seven columns was the old workaround
+// and it always lied about where a card really sat. `Lane` is a purpose-built
+// field with exactly these seven values and nothing else.
+//
+// Order is the workflow: parked, sent out, being worked, blocked, about to
+// land, landed, filed away.
 const OPP_STAGES = [
-  'Lead', 'Qualified', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost',
+  'Future Plans', 'Submitted', 'In Work', 'Waiting On', 'Closing', 'Done', 'Archive',
 ];
 
-// The live Airtable Stage single-select has 13 MORE options beyond the six
-// canonical lanes (verified against the base schema 2026-07). Previously any
-// card with one of these stages silently piled into the Lead lane AND the edit
-// form rewrote its real stage to "Lead" on save. Now: every stage is listed in
-// the form (grouped), and STAGE_LANE_ALIASES maps each extra stage to the lane
-// it should sit in on the board — without ever changing the record's true stage.
+// Legacy `Stage` values still appear on records and in the edit form. They are
+// kept for history and reporting; they no longer decide the column.
 const EXTRA_STAGES = [
+  'Lead', 'Qualified', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost',
   'Prospect', 'Exploring', 'Forming', 'Due diligence', 'Underwriting',
-  'Structuring', 'Submitted', 'Verbal commit', 'Committed', 'Deposit pending',
+  'Structuring', 'Verbal commit', 'Committed', 'Deposit pending',
   'Active', 'In build', 'Delivered',
 ];
+
+// Fallback only, for a record whose Lane was never backfilled. Every existing
+// record was backfilled on 2026-08-04, so this is a safety net for rows created
+// directly in Airtable without a Lane rather than a routine path.
 const STAGE_LANE_ALIASES = {
-  'Prospect':        'Lead',
-  'Exploring':       'Lead',
-  'Forming':         'Qualified',
-  'Due diligence':   'Qualified',
-  'Underwriting':    'Qualified',
-  'Structuring':     'Proposal',
-  'Submitted':       'Proposal',
-  'Verbal commit':   'Negotiation',
-  'Committed':       'Negotiation',
-  'Deposit pending': 'Negotiation',
-  'Active':          'Closed Won',
-  'In build':        'Closed Won',
-  'Delivered':       'Closed Won',
+  'Lead': 'Future Plans', 'Prospect': 'Future Plans', 'Exploring': 'Future Plans',
+  'Qualified': 'Future Plans', 'Forming': 'Future Plans',
+  'Proposal': 'Submitted', 'Structuring': 'Submitted',
+  'Due diligence': 'In Work', 'Underwriting': 'In Work', 'Negotiation': 'In Work',
+  'Active': 'In Work', 'In build': 'In Work',
+  'Verbal commit': 'Closing', 'Committed': 'Closing', 'Deposit pending': 'Closing',
+  'Closed Won': 'Done', 'Delivered': 'Done',
+  'Closed Lost': 'Archive',
 };
-// Canonical lane for any stage value (unknown stages land in Lead).
-const canonicalStage = (stage) =>
-  OPP_STAGES.includes(stage) ? stage : (STAGE_LANE_ALIASES[stage] || 'Lead');
+
+/**
+ * Which column a card belongs in. Lane wins outright; Stage is only consulted
+ * when Lane is blank, which should not happen for anything the app created.
+ */
+const canonicalStage = (stage, lane) => {
+  if (lane && OPP_STAGES.includes(lane)) return lane;
+  return STAGE_LANE_ALIASES[stage] || 'Future Plans';
+};
 
 const STAGE_STYLE = {
-  'Lead':        { hBg: C.ink5,  hFg: '#fff', border: C.ink5  },
-  'Qualified':   { hBg: C.blu,   hFg: '#fff', border: C.blu   },
-  'Proposal':    { hBg: C.yel,   hFg: '#fff', border: C.yel   },
-  'Negotiation': { hBg: C.acc,   hFg: '#fff', border: C.acc   },
-  'Closed Won':  { hBg: C.grn,   hFg: '#fff', border: C.grn   },
-  'Closed Lost': { hBg: C.ink3,  hFg: '#fff', border: C.ink3  },
+  'Future Plans': { hBg: C.ink3,  hFg: '#fff', border: C.ink3  },
+  'Submitted':    { hBg: C.blu,   hFg: '#fff', border: C.blu   },
+  'In Work':      { hBg: C.acc,   hFg: '#fff', border: C.acc   },
+  'Waiting On':   { hBg: C.yel,   hFg: '#fff', border: C.yel   },
+  'Closing':      { hBg: C.pur || C.blu, hFg: '#fff', border: C.pur || C.blu },
+  'Done':         { hBg: C.grn,   hFg: '#fff', border: C.grn   },
+  'Archive':      { hBg: C.ink2,  hFg: '#fff', border: C.ink2  },
 };
+
+// The counterparty paperwork ladder, shown as the NCNDA tag on a card. Ladder
+// order, not alphabetical — it is a sequence.
+const PAPERWORK_STAGES = [
+  'Initial Outreach', 'NCNDA Sent', 'NCNDA Signed', 'Discovery Call',
+  'Contract Negotiation', 'Deal Finalization', 'Closed', 'Stalled', 'Archived',
+];
 
 const OPP_PRIORITIES = ['', 'High Priority', 'Medium Priority', 'Low Priority'];
 
@@ -85,7 +104,7 @@ function defaultLanes() {
 function laneForCard(opp, lanes, assignments) {
   const assigned = assignments?.[opp.id];
   if (assigned && lanes.some(l => l.id === assigned)) return assigned;
-  const stage = canonicalStage(opp.stage);
+  const stage = canonicalStage(opp.stage, opp.lane);
   const byStage = lanes.find(l => l.mapsTo === stage);
   return (byStage || lanes[0])?.id;
 }
@@ -108,7 +127,7 @@ function LaneEditor({ slug, lanes, onSave, onClose }) {
     id: `lane-${Date.now()}`,
     label: 'New lane',
     color: LANE_PALETTE[d.length % LANE_PALETTE.length],
-    mapsTo: 'Lead',
+    mapsTo: 'Future Plans',
   }]);
 
   const save = async () => {
@@ -279,7 +298,7 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
 // underneath this opportunity sit at the bottom (add / advance / edit / remove,
 // live against the Master Action Board).
 function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList }) {
-  const lane   = canonicalStage(opp.stage);
+  const lane   = canonicalStage(opp.stage, opp.lane);
   const sStyle = STAGE_STYLE[lane] || {};
   const save   = (patch) => onPatch(opp.id, patch);
 
@@ -337,11 +356,26 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       {/* ── Live entry fields ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
         <div>
-          <span style={lbl}>Stage</span>
-          <select value={opp.stage || 'Lead'} onChange={e => save({ stage: e.target.value })} style={inp}>
-            <optgroup label="Pipeline">{OPP_STAGES.map(s => <option key={s}>{s}</option>)}</optgroup>
-            <optgroup label="Other stages">{EXTRA_STAGES.map(s => <option key={s}>{s}</option>)}</optgroup>
-            {opp.stage && !OPP_STAGES.includes(opp.stage) && !EXTRA_STAGES.includes(opp.stage) && <option value={opp.stage}>{opp.stage}</option>}
+          <span style={lbl}>Lane</span>
+          {/* Board order, NOT alphabetical. These seven are a workflow and
+              sorting them A–Z would put Archive first and Waiting On last. */}
+          <select value={opp.lane || lane} onChange={e => save({ lane: e.target.value })} style={inp}>
+            {OPP_STAGES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <span style={lbl}>Paperwork · NCNDA</span>
+          <select value={opp.paperworkStage || ''} onChange={e => save({ paperworkStage: e.target.value })} style={inp}>
+            <option value="">Not tracked</option>
+            {PAPERWORK_STAGES.map(s => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <span style={lbl}>Stage (legacy)</span>
+          <select value={opp.stage || ''} onChange={e => save({ stage: e.target.value })} style={inp}>
+            <option value="">—</option>
+            {[...EXTRA_STAGES].sort((a, b) => a.localeCompare(b)).map(s => <option key={s}>{s}</option>)}
+            {opp.stage && !EXTRA_STAGES.includes(opp.stage) && <option value={opp.stage}>{opp.stage}</option>}
           </select>
         </div>
         <div>
@@ -1047,24 +1081,26 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
   };
 
   // ── Drag-and-drop / quick advance (kanban mode) ────────────────────────────
-  // Moving a card records the lane assignment (per-company boards) AND updates
-  // the canonical Stage the lane maps to. Every move gets an Undo toast
-  // (2026-07 UI pass).
+  // Moving a card records the lane assignment (per-company boards) AND writes
+  // the `Lane` field the column maps to. It deliberately does NOT touch the
+  // legacy `Stage`: dragging a card to "In Work" should not silently rewrite a
+  // record that says "Due diligence" into something less specific. Stage is
+  // edited on the card; Lane is what the board moves.
   const applyMove = async (opp, targetLane) => {
-    const prevLane  = laneForCard(opp, lanes, assignments);
-    const prevStage = opp.stage;
-    if (prevLane === targetLane.id) return;
+    const prevLaneId = laneForCard(opp, lanes, assignments);
+    const prevLane   = opp.lane;
+    if (prevLaneId === targetLane.id) return;
 
     if (pipelineSlug) saveAssignment(opp.id, targetLane.id);
 
-    const targetStage  = targetLane.mapsTo || targetLane.label;
-    const changedStage = opp.stage !== targetStage && OPP_STAGES.includes(targetStage);
-    if (changedStage) {
-      setOpps(prev => prev.map(o => o.id === opp.id ? { ...o, stage: targetStage } : o));
+    const nextLane    = targetLane.mapsTo || targetLane.label;
+    const changedLane = opp.lane !== nextLane && OPP_STAGES.includes(nextLane);
+    if (changedLane) {
+      setOpps(prev => prev.map(o => o.id === opp.id ? { ...o, lane: nextLane } : o));
       try {
-        await updateOpportunity(opp.id, { stage: targetStage });
+        await updateOpportunity(opp.id, { lane: nextLane });
       } catch (e) {
-        showToast?.('Stage update failed: ' + e.message);
+        showToast?.('Lane update failed: ' + e.message);
         load();
         return;
       }
@@ -1074,10 +1110,10 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
       text: `${opp.name} → ${targetLane.label}`,
       actionLabel: 'Undo',
       onAction: () => {
-        if (pipelineSlug) saveAssignment(opp.id, prevLane);
-        if (changedStage) {
-          setOpps(prev => prev.map(o => o.id === opp.id ? { ...o, stage: prevStage } : o));
-          updateOpportunity(opp.id, { stage: prevStage }).catch(() => load());
+        if (pipelineSlug) saveAssignment(opp.id, prevLaneId);
+        if (changedLane) {
+          setOpps(prev => prev.map(o => o.id === opp.id ? { ...o, lane: prevLane } : o));
+          updateOpportunity(opp.id, { lane: prevLane }).catch(() => load());
         }
       },
     });
@@ -1217,7 +1253,7 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
                     onDragOver={e => { e.preventDefault(); setDragOver(lane.id); }}
                     onDrop={e => handleDrop(e, lane)}
                     onDragLeave={() => setDragOver(null)}
-                    onAdd={l => openForm({ dealCategory: companyCats[0] || '', stage: l.mapsTo || 'Lead' })}
+                    onAdd={l => openForm({ dealCategory: companyCats[0] || '', lane: l.mapsTo || 'Future Plans' })}
                   />
                 ))}
               </div>

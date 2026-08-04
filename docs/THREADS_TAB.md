@@ -709,3 +709,64 @@ Also in the rail:
   off the existing `Kind` field.
 - Entities sort by live participant count, then alphabetically. The no-entity
   bucket always sinks last — it is the one that needs cleaning up.
+
+---
+
+## 20. Epic → Story → Task (2026-08-04)
+
+The model, in Tanner's words: *"there's a main opportunity then sub opportunities
+within that... each one of those people would be a subopportunity."*
+
+| Level | Airtable | Example |
+|---|---|---|
+| **Epic** | Opportunity, `Parent Opportunity` empty | OVMG X Genesis — Bennettsville $20M Bridge Loan |
+| **Story** | Opportunity, `Parent Opportunity` set | OVMG X Loan Solutions — Adam Shore |
+| **Task** | Master Action Board, linked to either | Send the redlined term sheet |
+
+A **story is one thread**, not one person. A two-person email chain is still one
+thread, so a story links a LIST of contacts. Splitting it per person would mean
+tracking the same conversation in two places and resolving it in neither. The
+People view is where the by-person grouping lives; the two are deliberately
+different and must not be unified.
+
+### Two new fields on Opportunities
+
+`Lane` — the kanban column. **Future Plans, Submitted, In Work, Waiting On,
+Closing, Done, Archive.** It exists because the legacy `Stage` select carries 19
+historical options and the Airtable API cannot edit an existing select's choices.
+The old board aliased those nineteen into six columns, which always lied about
+where a card really sat. All 41 records were backfilled on 2026-08-04
+(Exploring/Lead → Future Plans, Structuring/Proposal → Submitted,
+Active/In build/Negotiation → In Work, Delivered/Closed Won → Done,
+Closed Lost → Archive). `Stage` is kept for history and is still editable on the
+card, but it no longer decides the column.
+
+`Paperwork Stage` — the NCNDA tag on a story, on the Capital ladder. Separate
+from Lane because "In Work" and "NCNDA Signed" are different facts and collapsing
+them loses one of them.
+
+Dragging a card writes `Lane` only. It does **not** rewrite `Stage`: moving
+something to "In Work" must not silently flatten a record that says "Due
+diligence" into something less specific.
+
+### The three panes
+
+Rail = epics grouped by entity. Centre = that epic's stories, sorted by lane then
+by overdue count, with Done/Archive folded behind a toggle. Right = the story
+opened: lane and paperwork as save-on-change dropdowns, who is on the thread,
+open tasks with due dates, and the timeline.
+
+### Dropdown ordering
+
+Contact and workstream pickers sort A–Z. Lane and Paperwork Stage do **not** —
+they are sequences, and sorting them alphabetically would put Archive first and
+Waiting On last.
+
+### Still open
+
+- Participations and stories both express "who is on this thread". Participations
+  carry the per-person paperwork stage and the evidence gate; a story carries the
+  thread-level tag. They coexist: the People view now attaches people to stories
+  rather than to epics. Collapsing the two is a later decision, not a silent one.
+- Triage, Pipeline and Accountability still read participations, so they are
+  unaffected by this change.

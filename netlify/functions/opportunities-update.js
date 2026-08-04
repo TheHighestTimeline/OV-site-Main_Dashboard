@@ -22,6 +22,7 @@ export const handler = async (event) => {
 
   const { id, name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
           nextStep, dataRoom, priority, kind, otherParty, probability, goal,
+          lane, paperworkStage,
           companyIds, contactIds, projectIds, parentId } = body;
   if (!id) return err(400, 'id is required');
 
@@ -39,6 +40,10 @@ export const handler = async (event) => {
     if (kind      !== undefined) update.kind      = kind || null;
     if (otherParty !== undefined) update.otherParty = otherParty;
     if (goal      !== undefined) update.goal      = goal;
+    // null, never '': Airtable reads '' on a singleSelect as a request to create
+    // an option named "" and rejects the whole write.
+    if (lane           !== undefined) update.lane           = lane || null;
+    if (paperworkStage !== undefined) update.paperworkStage = paperworkStage || null;
     // Airtable percent fields store a 0–1 fraction; the UI works in 0–100.
     if (probability !== undefined) update.probability = probability != null && probability !== '' ? Number(probability) / 100 : null;
     const t = normType(type, kanbanType);

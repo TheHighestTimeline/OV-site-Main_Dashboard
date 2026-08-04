@@ -102,6 +102,10 @@ export const handler = async (event) => {
         stageId:     LABEL_TO_ID[o.stage] || null,
         stageLabel:  o.stage || null,
         goal:        r.fields?.['Goal'] || '',
+        lane:           o.lane || '',
+        paperworkStage: o.paperworkStage || '',
+        contactIds:  arr(r.fields?.['Associated Contact']),
+        taskIds:     arr(r.fields?.['Master Action Board']),
         dataRoom:    o.dataRoom || '',
         nextStep:    o.nextStep || '',
         priority:    o.priority || '',
@@ -114,17 +118,26 @@ export const handler = async (event) => {
 
     const oppById = Object.fromEntries(opps.map(o => [o.id, o]));
 
-    // A top-level opportunity with NO children is not an umbrella over anything;
-    // it is the work itself. Classifying it as a program made it a dead end in
-    // the rail — expandable, empty, and impossible to add anyone to. So a
-    // program only counts as a program once something is nested under it, and
-    // everything else is a workstream that can carry participations directly.
-    // This is what lets a flat base (no Parent Opportunity anywhere) work at all.
+    // ── Epic / Story ─────────────────────────────────────────────────────────
+    // EPIC   = a top-level opportunity   ("OVMG X Genesis — Bennettsville $20M")
+    // STORY  = a sub-opportunity under it ("OVMG X Adam Shore — Loan Solutions")
+    // TASK   = Master Action Board, linked to either.
+    //
+    // A story is ONE THREAD: one company, one or two people, its own paperwork
+    // stage, its own timeline. That is the unit you work, and it is why a story
+    // links contacts as a list rather than one — a two-person email thread is
+    // still one thread and must not be split into two cards.
     const hasChildren = new Set(opps.map(o => o.parentId).filter(Boolean));
     for (const o of opps) {
-      o.isProgram = o.isProgram && hasChildren.has(o.id);
-      o.standalone = !o.parentId && !hasChildren.has(o.id);
+      o.isEpic  = !o.parentId;
+      o.isStory = Boolean(o.parentId);
+      // Retained for Pipeline and the older views, which key off these names.
+      o.isProgram = o.isEpic && hasChildren.has(o.id);
+      o.standalone = o.isEpic && !hasChildren.has(o.id);
     }
+
+    const epics   = opps.filter(o => o.isEpic);
+    const stories = opps.filter(o => o.isStory);
 
     const programs    = opps.filter(o => o.isProgram);
     const workstreams = opps.filter(o => !o.isProgram);
@@ -207,7 +220,11 @@ export const handler = async (event) => {
       console.warn('[coo-threads-data] event rollup failed:', e.message);
     }
 
-    // ── Open task counts per participation ───────────────────────────────────
+    // ── Open task counts, per participation and per opportunity ──────────────
+    // The id sets let epics and stories count their own linked tasks without a
+    // second pass over the table.
+    const openTaskIds    = new Set();
+    const overdueTaskIds = new Set();
     try {
       const taskRecords = await listRecordsLenient(TASKS_TBL(), {
         fields: ['Action Name', 'Status', 'Due Date', 'Participation'],
@@ -215,12 +232,16 @@ export const handler = async (event) => {
       const today = new Date().toISOString().slice(0, 10);
       for (const t of taskRecords) {
         if (isTerminalTaskStatus(t.fields?.['Status'])) continue;
+        const due     = t.fields?.['Due Date'];
+        const overdue = Boolean(due && String(due).slice(0, 10) < today);
+        openTaskIds.add(t.id);
+        if (overdue) overdueTaskIds.add(t.id);
+
         for (const pid of arr(t.fields?.['Participation'])) {
           const p = byId[pid];
           if (!p) continue;
           p.openTaskCount++;
-          const due = t.fields?.['Due Date'];
-          if (due && String(due).slice(0, 10) < today) p.overdueTaskCount++;
+          if (overdue) p.overdueTaskCount++;
         }
       }
     } catch (e) {
@@ -254,8 +275,38 @@ export const handler = async (event) => {
       prog.lastActivityAt   = kids.map(w => w.lastActivityAt).filter(Boolean).sort().pop() || null;
     }
 
+    // ── Story rollups, then epic rollups one level up ────────────────────────
+    for (const s of stories) {
+      s.contacts = s.contactIds.map(id => contactById[id]).filter(Boolean)
+        .map(c => ({ id: c.id, name: c.name, email: c.email, company: c.company }));
+      s.openTaskCount    = s.taskIds.filter(id => openTaskIds.has(id)).length;
+      s.overdueTaskCount = s.taskIds.filter(id => overdueTaskIds.has(id)).length;
+      s.participations   = shaped.filter(p => p.workstreamId === s.id);
+      s.lastActivityAt   = s.participations.map(p => p.lastActivityAt).filter(Boolean).sort().pop() || null;
+    }
+
+    for (const e of epics) {
+      const kids = stories.filter(s => s.parentId === e.id);
+      e.storyCount   = kids.length;
+      e.contactCount = new Set(kids.flatMap(s => s.contactIds)).size;
+      e.openTaskCount    = kids.reduce((n, s) => n + s.openTaskCount, 0)
+                         + e.taskIds.filter(id => openTaskIds.has(id)).length;
+      e.overdueTaskCount = kids.reduce((n, s) => n + s.overdueTaskCount, 0)
+                         + e.taskIds.filter(id => overdueTaskIds.has(id)).length;
+      e.signedCount  = kids.filter(s => s.paperworkStage === 'NCNDA Signed'
+                                     || s.paperworkStage === 'Closed').length;
+      e.laneCounts   = kids.reduce((acc, s) => {
+        const k = s.lane || 'Unassigned';
+        acc[k] = (acc[k] || 0) + 1;
+        return acc;
+      }, {});
+      e.lastActivityAt = kids.map(s => s.lastActivityAt).filter(Boolean).sort().pop() || null;
+    }
+
     return ok({
       configured:   participationsConfigured(),
+      epics,
+      stories,
       programs,
       workstreams,
       participations: shaped,

@@ -458,6 +458,15 @@ export const OPPORTUNITIES_MAP = {
   kind:        'Kind',      // singleSelect Deal/Workstream (added 2026-07-16)
   otherParty:  'Other Party',
   goal:        'Goal',      // load-bearing: no Goal = no participations (sprawl rule)
+  // Lane is the kanban column (Future Plans → Archive). Deliberately NOT the
+  // legacy `Stage` field: that select carries 19 historical options and the
+  // Airtable API cannot edit an existing select's choices, so the board gets a
+  // clean field of its own rather than nineteen values aliased into seven.
+  lane:           'Lane',
+  // Where the counterparty paperwork stands on a sub-opportunity. This is the
+  // NCNDA tag. Separate from Lane because "In Work" and "NCNDA Signed" are
+  // different facts and collapsing them loses one of them.
+  paperworkStage: 'Paperwork Stage',
 };
 
 export const OUTREACH_MAP = {
