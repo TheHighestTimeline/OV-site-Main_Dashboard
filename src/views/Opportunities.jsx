@@ -85,6 +85,17 @@ const PAPERWORK_STAGES = [
 
 // Stored Level wins; a blank one falls back to the link, which is how every
 // record created before the field existed still reads correctly.
+const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
+function priorityRank(p) {
+  const k = String(p || '').toLowerCase().replace(/\s*priority\s*/g, '').trim();
+  return PRIORITY_RANK[k] ?? 3;
+}
+function byPriorityThenName(a, b) {
+  const d = priorityRank(a.priority) - priorityRank(b.priority);
+  if (d) return d;
+  return (a.name || '').localeCompare(b.name || '');
+}
+
 const levelOf = (o) => o?.level || (o?.parentId ? 'Story' : 'Epic');
 
 const hdrBtn = {
@@ -1220,6 +1231,11 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
       const laneId = laneForCard(o, lanes, assignments);
       (m[laneId] || m[lanes[0]?.id] || []).push(o);
     });
+    // High above Medium above Low inside every lane. A lane you have to read
+    // top to bottom to find the urgent card is a list, not a board.
+    // Unset priority sorts below Low: it has not been triaged, so it should not
+    // outrank something explicitly marked unimportant.
+    for (const k of Object.keys(m)) m[k].sort(byPriorityThenName);
     return m;
   }, [scoped, lanes, assignments]);
 

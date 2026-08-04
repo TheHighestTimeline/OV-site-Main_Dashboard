@@ -11,7 +11,8 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { C, SERIF, SANS, MONO } from '../../constants.js';
-import { updateOpportunity, getTasks, advanceStage } from '../../api.js';
+import { updateOpportunity, advanceStage } from '../../api.js';
+import TaskRowEditor from '../opportunities/TaskRowEditor.jsx';
 import Timeline from '../../components/Timeline.jsx';
 import { Empty, EntityChip } from './shared.jsx';
 
@@ -34,10 +35,9 @@ const select = {
   fontFamily: SANS, fontSize: 12.5, outline: 'none',
 };
 
-export default function StoryDetail({ story, contacts = [], onChanged, showToast, onClose, onEdit, isMobile }) {
+export default function StoryDetail({ story, contacts = [], opportunities = [], onChanged, showToast, onClose, onEdit, isMobile }) {
   const [lane,  setLane]  = useState(story?.lane || '');
   const [pw,    setPw]    = useState(story?.paperworkStage || '');
-  const [tasks, setTasks] = useState([]);
   const [busy,  setBusy]  = useState(false);
 
   useEffect(() => {
@@ -45,22 +45,12 @@ export default function StoryDetail({ story, contacts = [], onChanged, showToast
     setPw(story?.paperworkStage || '');
   }, [story?.id, story?.lane, story?.paperworkStage]);
 
-  useEffect(() => {
-    let live = true;
-    if (!story?.id) { setTasks([]); return undefined; }
-    getTasks()
-      .then(rows => { if (live) setTasks(rows || []); })
-      .catch(() => { if (live) setTasks([]); });
-    return () => { live = false; };
-  }, [story?.id]);
-
-  const mine = useMemo(() => {
-    if (!story?.id) return [];
-    return (tasks || [])
-      .filter(t => (t.opportunityIds || []).includes(story.id))
-      .filter(t => !TERMINAL.has(String(t.status || '').trim().toLowerCase()))
-      .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999')));
-  }, [tasks, story?.id]);
+  // The rows come down with the story now, so there is no second fetch and no
+  // window where the pane shows a count it cannot expand.
+  const mine = useMemo(() => (story?.tasks || [])
+    .filter(t => !TERMINAL.has(String(t.status || '').trim().toLowerCase()))
+    .sort((a, b) => String(a.dueDate || '9999').localeCompare(String(b.dueDate || '9999'))),
+  [story]);
 
   const people = useMemo(() => {
     if (story?.contacts?.length) return story.contacts;
@@ -218,30 +208,18 @@ export default function StoryDetail({ story, contacts = [], onChanged, showToast
             Nothing outstanding. Add a task from the board and link it to this sub-opportunity.
           </div>
         )}
-        {mine.slice(0, 6).map(t => {
-          const overdue = t.dueDate && String(t.dueDate).slice(0, 10) < today;
-          return (
-            <div key={t.id} style={{
-              display: 'flex', alignItems: 'baseline', gap: 8, padding: '3px 0',
-            }}>
-              <span style={{ flex: 1, fontFamily: SANS, fontSize: 12, color: C.ink8, minWidth: 0 }}>
-                {t.name}
-              </span>
-              {t.dueDate && (
-                <span style={{
-                  fontFamily: MONO, fontSize: 9, flexShrink: 0,
-                  color: overdue ? C.red : C.ink3,
-                  fontWeight: overdue ? 700 : 400,
-                }}>{String(t.dueDate).slice(5, 10)}</span>
-              )}
-            </div>
-          );
-        })}
-        {mine.length > 6 && (
-          <div style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, marginTop: 3 }}>
-            +{mine.length - 6} more
-          </div>
-        )}
+        {/* Editable here, not just listed. Noticing a task is wrong while
+            reading the thread and having to go elsewhere to fix it is why it
+            stays wrong. */}
+        {mine.map(t => (
+          <TaskRowEditor
+            key={t.id}
+            task={t}
+            opportunities={opportunities}
+            onChanged={onChanged}
+            showToast={showToast}
+          />
+        ))}
       </div>
 
       {/* ── History ───────────────────────────────────────────────────────── */}

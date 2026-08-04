@@ -136,8 +136,14 @@ export const handler = async (event) => {
       o.standalone = o.isEpic && !hasChildren.has(o.id);
     }
 
-    const epics   = opps.filter(o => o.isEpic);
-    const stories = opps.filter(o => o.isStory);
+    // Archived work is finished work. Threads is the board for what is live, and
+    // an archived deal sitting in the rail is noise you have to skip every time.
+    const isArchived = o =>
+      String(o.lane || '').toLowerCase() === 'archive' ||
+      String(o.paperworkStage || '').toLowerCase() === 'archived';
+
+    const epics   = opps.filter(o => o.isEpic   && !isArchived(o));
+    const stories = opps.filter(o => o.isStory  && !isArchived(o));
 
     const programs    = opps.filter(o => o.isProgram);
     const workstreams = opps.filter(o => !o.isProgram);
@@ -225,9 +231,12 @@ export const handler = async (event) => {
     // second pass over the table.
     const openTaskIds    = new Set();
     const overdueTaskIds = new Set();
+    // The rows themselves, so a story can LIST its work rather than report a
+    // number the user then has to go elsewhere to expand.
+    const taskById       = {};
     try {
       const taskRecords = await listRecordsLenient(TASKS_TBL(), {
-        fields: ['Action Name', 'Status', 'Due Date', 'Participation'],
+        fields: ['Action Name', 'Status', 'Due Date', 'Priority', 'Participation'],
       });
       const today = new Date().toISOString().slice(0, 10);
       for (const t of taskRecords) {
@@ -236,6 +245,14 @@ export const handler = async (event) => {
         const overdue = Boolean(due && String(due).slice(0, 10) < today);
         openTaskIds.add(t.id);
         if (overdue) overdueTaskIds.add(t.id);
+        taskById[t.id] = {
+          id:       t.id,
+          name:     t.fields?.['Action Name'] || '',
+          status:   t.fields?.['Status'] || '',
+          dueDate:  t.fields?.['Due Date'] || null,
+          priority: t.fields?.['Priority'] || '',
+          overdue,
+        };
 
         for (const pid of arr(t.fields?.['Participation'])) {
           const p = byId[pid];
@@ -279,8 +296,9 @@ export const handler = async (event) => {
     for (const s of stories) {
       s.contacts = s.contactIds.map(id => contactById[id]).filter(Boolean)
         .map(c => ({ id: c.id, name: c.name, email: c.email, company: c.company }));
-      s.openTaskCount    = s.taskIds.filter(id => openTaskIds.has(id)).length;
-      s.overdueTaskCount = s.taskIds.filter(id => overdueTaskIds.has(id)).length;
+      s.tasks            = s.taskIds.map(id => taskById[id]).filter(Boolean);
+      s.openTaskCount    = s.tasks.length;
+      s.overdueTaskCount = s.tasks.filter(t => t.overdue).length;
       s.participations   = shaped.filter(p => p.workstreamId === s.id);
       s.lastActivityAt   = s.participations.map(p => p.lastActivityAt).filter(Boolean).sort().pop() || null;
     }

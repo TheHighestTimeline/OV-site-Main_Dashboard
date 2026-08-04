@@ -1,5 +1,6 @@
 import { airtableUpdate, toAirtableFields, CONTACTS_MAP } from './_airtable.js';
 import { ok, err, CORS } from './_http.js';
+import { resolveCompanyNames } from './_companies.js';
 import { requireAuth } from './_auth.js';
 
 const TABLE = () => process.env.AIRTABLE_TABLE_CONTACTS || 'CRM Contacts';
@@ -16,7 +17,7 @@ export const handler = async (event) => {
       last_contacted_at, owner, nextAction, nextActionDate, source,
       segment, introducedBy, bio, involvement, companyAddress,
       currentSummary, referrerId, referralEconomics,
-      linkedin, notes, companyIds,
+      linkedin, notes, companyIds, company,
     } = body;
     if (!id) return err(400, 'id is required');
 
@@ -56,10 +57,22 @@ export const handler = async (event) => {
     if (referrerId !== undefined) fields['Referred By'] = referrerId ? [referrerId] : [];
     // Companies is a real multi-link: a contact can genuinely belong to several.
     if (companyIds !== undefined) fields['Companies'] = Array.isArray(companyIds) ? companyIds : [];
+    // Same rule on edit as on create: a typed name becomes a real linked record.
+    let companySync = null;
+    if (String(company || '').trim()) {
+      companySync = await resolveCompanyNames([company]);
+      const base = Array.isArray(fields['Companies']) ? fields['Companies'] : [];
+      fields['Companies'] = [...new Set([...base, ...companySync.ids])];
+    }
     if (Object.keys(fields).length === 0) return ok({ id, updated: false });
 
     await airtableUpdate(TABLE(), id, fields);
-    return ok({ id, updated: true });
+    return ok({
+      id,
+      updated: true,
+      companyCreated:     companySync?.created || [],
+      possibleDuplicates: companySync?.possibleDuplicates || [],
+    });
   } catch (e) {
     return err(500, e.message);
   }

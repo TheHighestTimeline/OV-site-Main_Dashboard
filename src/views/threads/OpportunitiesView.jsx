@@ -96,7 +96,8 @@ export default function OpportunitiesView({
       return (
         <>
           <StoryDetail
-            story={story} contacts={contacts} onChanged={onChanged} showToast={showToast}
+            story={story} contacts={contacts} opportunities={[...epics, ...stories]}
+            onChanged={onChanged} showToast={showToast}
             onClose={() => onSelect(null)} onEdit={() => setEditingStory(story)} isMobile
           />
           {storyModal}
@@ -149,7 +150,8 @@ export default function OpportunitiesView({
       <div style={{ position: 'sticky', top: 0, maxHeight: 'calc(100vh - 160px)', overflow: 'hidden' }}>
         <Panel sx={{ height: 'calc(100vh - 170px)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <StoryDetail
-            story={story} contacts={contacts} onChanged={onChanged}
+            story={story} contacts={contacts} opportunities={[...epics, ...stories]}
+            onChanged={onChanged}
             showToast={showToast} onEdit={() => story && setEditingStory(story)}
           />
         </Panel>

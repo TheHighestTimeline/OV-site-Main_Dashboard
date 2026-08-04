@@ -342,8 +342,20 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
   }
 
   const addContact = async data => {
-    try { await createContact(data); showToast(`Added ${data.name} to CRM ✓`); closeOv(); loadContacts(); }
-    catch (e) { showToast('Failed to add contact: ' + e.message); }
+    try {
+      const res = await createContact(data);
+      // Say when a company was created off the back of a typed name, so nobody
+      // is left wondering whether a new record appeared behind their back.
+      const made = (res?.companyCreated || []).map(x => x.name).join(', ');
+      const dupes = (res?.possibleDuplicates || []).length;
+      showToast(
+        `Added ${data.name} to CRM ✓` +
+        (made ? ` · created company ${made}` : '') +
+        (dupes ? ` · ${dupes} possible duplicate compan${dupes === 1 ? 'y' : 'ies'} to review` : ''),
+      );
+      closeOv();
+      loadContacts();
+    } catch (e) { showToast('Failed to add contact: ' + e.message); }
   };
 
   const chip = (opts, cur, set) => (
