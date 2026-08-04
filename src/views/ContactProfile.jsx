@@ -301,10 +301,48 @@ function TimelineTab({ c, notes }) {
   useEffect(() => { getActivitiesForContact(c.id).then(setActs).catch(() => setActs([])); }, [c.id]);
 
   const events = useMemo(() => {
-    const out = [];
-    (notes || []).forEach(n => out.push({ id: 'n' + n.id, kind: n.type || 'Note', title: n.title, body: n.summary || n.body, date: n.createdTime }));
-    (acts || []).forEach(a => out.push({ id: 'a' + a.id, kind: a.type || 'Activity', title: a.title || a.type || 'Activity', body: a.aiSummary || a.body, date: a.date }));
-    return out.filter(e => e.date).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // notes-list and activities-list BOTH read the same Airtable table
+    // (Activities) filtered on the same Contact link — notes were repointed
+    // there in 2026-07 when the separate Notes table turned out never to have
+    // existed. So every record arrives twice, once shaped as a note and once as
+    // an activity. Prefixing the React keys 'n'/'a' made the two copies unique
+    // enough to both render, which is why the timeline read as the same entry
+    // pasted over and over.
+    //
+    // Dedupe on the underlying Airtable record id, which is identical for the
+    // two shapes of the same row. The activity shape wins because it carries
+    // Type, Source and the real Date field; the note shape only has createdTime.
+    const byId = new Map();
+
+    (notes || []).forEach(n => {
+      if (!n?.id || byId.has(n.id)) return;
+      byId.set(n.id, {
+        id:    n.id,
+        kind:  n.type || 'Note',
+        title: n.title,
+        body:  n.summary || n.body,
+        date:  n.createdTime,
+      });
+    });
+
+    (acts || []).forEach(a => {
+      if (!a?.id) return;
+      const prior = byId.get(a.id);
+      byId.set(a.id, {
+        id:    a.id,
+        kind:  a.type || 'Activity',
+        title: a.title || a.type || 'Activity',
+        body:  a.aiSummary || a.body,
+        // Activities.Date is date-only and can be blank on rows created by an
+        // importer. Fall back to the note shape's createdTime so a record with
+        // no Date still appears rather than being silently filtered out below.
+        date:  a.date || prior?.date || null,
+      });
+    });
+
+    return [...byId.values()]
+      .filter(e => e.date)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [notes, acts]);
 
   if (notes == null || acts == null) return <div style={{ padding: 24, textAlign: 'center', color: C.ink3, fontSize: 12 }}>Loading timeline…</div>;
