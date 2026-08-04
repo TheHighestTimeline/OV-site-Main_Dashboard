@@ -28,7 +28,7 @@ const inp = {
   width: '100%', boxSizing: 'border-box', outline: 'none',
 };
 
-export default function TaskRowEditor({ task, opportunities = [], onChanged, showToast }) {
+export default function TaskRowEditor({ task, opportunities = [], onChanged, onDelete, showToast }) {
   const [open,  setOpen]  = useState(false);
   const [busy,  setBusy]  = useState(false);
   const [name,  setName]  = useState(task.name || task.task || '');
@@ -150,6 +150,13 @@ export default function TaskRowEditor({ task, opportunities = [], onChanged, sho
               </select>
             </div>
           </div>
+
+          {onDelete && (
+            <button onClick={onDelete} disabled={busy} style={{
+              justifySelf: 'start', border: 'none', background: 'none', color: C.red,
+              fontFamily: MONO, fontSize: 9.5, letterSpacing: '.05em', cursor: 'pointer', padding: 0,
+            }}>Delete task</button>
+          )}
         </div>
       )}
     </div>

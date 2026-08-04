@@ -15,6 +15,8 @@
 import { useState, useMemo } from 'react';
 import { C, SANS, MONO } from '../../constants.js';
 
+const SIGNED = new Set(['NCNDA Signed', 'Closed']);
+
 const LEVELS = [
   { id: 'epic',  label: 'Epic',  hint: 'A top-level deal. Sub-opportunities hang off it.' },
   { id: 'story', label: 'Story', hint: 'One thread inside a deal — one company, its own paperwork.' },
@@ -175,26 +177,57 @@ export default function HierarchyEditor({
       )}
 
       {shown === 'epic' && children.length > 0 && (
-        <div style={{ marginTop: 9 }}>
+        <div style={{ marginTop: 10 }}>
           <span style={lbl}>Sub-opportunities · {children.length}</span>
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+          {/* Rows, not chips: each carries the lane, the paperwork tag and the
+              open-task count, so the epic answers "where does this deal stand"
+              without opening every thread. Clicking one opens it. */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {children.map(c => (
-              <span key={c.id} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 5px 3px 10px',
-                borderRadius: 999, background: C.bg, border: `1px solid ${C.cr2}`,
-                fontFamily: SANS, fontSize: 11.5, color: C.ink8,
+              <div key={c.id} style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '6px 8px',
+                borderRadius: 7, background: C.bg, border: `1px solid ${C.cr2}`,
               }}>
-                <button onClick={() => onOpen?.(c.id)} style={linkBtn}>{c.name}</button>
+                <button
+                  onClick={() => onOpen?.(c.id)}
+                  title="Open this sub-opportunity"
+                  style={{ ...linkBtn, flex: 1, minWidth: 0, fontSize: 12 }}
+                >{c.name}</button>
+
+                {c.lane && (
+                  <span style={{
+                    fontFamily: MONO, fontSize: 8.5, letterSpacing: '.05em',
+                    textTransform: 'uppercase', padding: '2px 7px', borderRadius: 999,
+                    background: C.grS, color: C.ink5, whiteSpace: 'nowrap', flexShrink: 0,
+                  }}>{c.lane}</span>
+                )}
+
+                {c.paperworkStage && (
+                  <span style={{
+                    fontFamily: MONO, fontSize: 8.5, letterSpacing: '.05em',
+                    textTransform: 'uppercase', padding: '2px 7px', borderRadius: 999,
+                    whiteSpace: 'nowrap', flexShrink: 0,
+                    background: SIGNED.has(c.paperworkStage) ? `${C.grn}1f` : C.grS,
+                    color: SIGNED.has(c.paperworkStage) ? C.grn : C.ink5,
+                  }}>{c.paperworkStage}</span>
+                )}
+
+                {(c.tasks || []).length > 0 && (
+                  <span style={{
+                    fontFamily: MONO, fontSize: 9, color: C.ink3, flexShrink: 0,
+                  }}>▤ {c.tasks.length}</span>
+                )}
+
                 <button
                   title="Unlink — promotes it back to a top-level deal"
                   onClick={() => onSave({ parentId: null }, c.id)}
                   disabled={busy}
                   style={{
                     border: 'none', background: 'none', color: C.ink3,
-                    cursor: 'pointer', fontSize: 11, padding: '0 2px',
+                    cursor: 'pointer', fontSize: 11, padding: '0 2px', flexShrink: 0,
                   }}
                 >✕</button>
-              </span>
+              </div>
             ))}
           </div>
         </div>

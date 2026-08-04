@@ -187,23 +187,13 @@ const TASK_CYCLE = ['Not Started', 'In Progress', 'Done'];
 // Tasks tied to this opportunity via the Notion "Related Opportunities" relation.
 // They also surface on the company's Tasks board. Add / advance status / delete,
 // all synced straight to the Notion Tasks DB.
-function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
+function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null, allOpps = [] }) {
   const [tasks, setTasks]   = useState(null);
   const [adding, setAdding] = useState(false);
   const [title, setTitle]   = useState('');
   const [busy, setBusy]     = useState(false);
-  const [editId, setEditId] = useState(null);
-  const [draft,  setDraft]  = useState('');
   const [confirmNode, confirm] = useConfirm();
 
-  const saveEdit = async (t) => {
-    const v = draft.trim();
-    if (!v || v === t.task) { setEditId(null); return; }
-    setTasks(prev => prev.map(x => x.id === t.id ? { ...x, task: v } : x));
-    setEditId(null);
-    try { await updateTask(t.id, { task: v }); showToast?.('Task updated ✓'); }
-    catch (e) { showToast?.('Failed: ' + e.message); reload(); }
-  };
 
   const reload = useCallback(() => {
     getTasks()
@@ -229,12 +219,6 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
     setBusy(false);
   };
 
-  const advance = async (t) => {
-    const i = TASK_CYCLE.indexOf(t.status);
-    const next = TASK_CYCLE[(i + 1) % TASK_CYCLE.length] || 'Not Started';
-    setTasks(prev => prev.map(x => x.id === t.id ? { ...x, status: next } : x));
-    try { await updateTask(t.id, { status: next }); } catch (e) { showToast?.('Failed: ' + e.message); reload(); }
-  };
 
   const del = (t) => confirm({
     itemName: t.task, confirmLabel: 'Delete task',
@@ -265,27 +249,19 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
       ) : tasks.length === 0 ? (
         <div style={{ fontSize: 12, color: C.ink3, fontStyle: 'italic' }}>No tasks linked yet.</div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div>
+          {/* One task section, fully editable. The old cramped row (status pill +
+              rename + remove) was a second, weaker editor sitting next to this
+              one; there is now a single place to change anything about a task. */}
           {tasks.map(t => (
-            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 6 }}>
-              <button onClick={() => advance(t)} title="Advance status"
-                style={{ background: stBg(t.status), color: stFg(t.status), border: 'none', borderRadius: 999, padding: '2px 9px', fontFamily: MONO, fontSize: 9, letterSpacing: '.04em', textTransform: 'uppercase', cursor: 'pointer', flexShrink: 0 }}>
-                {t.status || 'Not Started'}
-              </button>
-              {editId === t.id ? (
-                <>
-                  <Inp value={draft} onChange={e => setDraft(e.target.value)} sx={{ flex: 1, fontSize: 12, padding: '4px 8px' }} />
-                  <button onClick={() => saveEdit(t)} style={{ background: 'none', border: 'none', color: C.grn, fontSize: 11, cursor: 'pointer', flexShrink: 0 }}>save</button>
-                  <button onClick={() => setEditId(null)} style={{ background: 'none', border: 'none', color: C.ink3, fontSize: 11, cursor: 'pointer', flexShrink: 0 }}>cancel</button>
-                </>
-              ) : (
-                <>
-                  <span style={{ flex: 1, fontSize: 12, color: C.ink8, lineHeight: 1.35 }}>{t.task}</span>
-                  <button onClick={() => { setEditId(t.id); setDraft(t.task); }} style={{ background: 'none', border: 'none', color: C.ink3, fontSize: 11, cursor: 'pointer', flexShrink: 0 }}>edit</button>
-                  <button onClick={() => del(t)} style={{ background: 'none', border: 'none', color: C.red, fontSize: 11, cursor: 'pointer', flexShrink: 0 }}>remove</button>
-                </>
-              )}
-            </div>
+            <TaskRowEditor
+              key={t.id}
+              task={t}
+              opportunities={allOpps}
+              onChanged={reload}
+              onDelete={() => del(t)}
+              showToast={showToast}
+            />
           ))}
         </div>
       )}
@@ -300,7 +276,7 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null }) {
 // both editable pickers AND clickable chips that jump into the CRM. The tasks
 // underneath this opportunity sit at the bottom (add / advance / edit / remove,
 // live against the Master Action Board).
-function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild, onTasksChanged }) {
+function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild }) {
   const lane   = canonicalStage(opp.stage, opp.lane);
   const sStyle = STAGE_STYLE[lane] || {};
   const save   = (patch) => onPatch(opp.id, patch);
@@ -531,24 +507,6 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
 
       <LinksEditor opp={opp} onSave={save} />
 
-      <div style={{ marginBottom: 12 }}>
-        <span style={lbl}>Tasks · {(opp.tasks || []).length}</span>
-        {!(opp.tasks || []).length && (
-          <div style={{ fontSize: 11.5, color: C.ink3 }}>
-            No tasks linked to this opportunity yet.
-          </div>
-        )}
-        {(opp.tasks || []).map(t => (
-          <TaskRowEditor
-            key={t.id}
-            task={t}
-            opportunities={allOpps || []}
-            onChanged={onTasksChanged}
-            showToast={showToast}
-          />
-        ))}
-      </div>
-
       <div style={{ marginBottom: 4 }}>
         <span style={lbl}>Notes</span>
         <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
@@ -557,7 +515,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       </div>
 
       {/* THE point of this popup: the tasks underneath this opportunity */}
-      <LinkedTasks oppId={opp.id} companyCat={opp.entity} showToast={showToast} extraTaskIds={opp.taskIds} />
+      <LinkedTasks oppId={opp.id} companyCat={opp.entity} showToast={showToast} extraTaskIds={opp.taskIds} allOpps={allOpps || []} />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, gap: 8, flexWrap: 'wrap' }}>
         <a href={airtableRecordUrl(tableId, opp.id)} target="_blank" rel="noopener noreferrer"
@@ -991,6 +949,16 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
 
   // CRM pickers for the quick view's live company/contact link fields.
   const [companiesList, setCompaniesList] = useState([]);
+  // Epics only / Stories only / Both. Stories are threads inside a deal, so a
+  // board showing both is a mixed-altitude list; the default is epics, which is
+  // the level you scan.
+  const [levelFilter, setLevelFilter] = useState(() => {
+    try { return localStorage.getItem('ovmg.opps.level') || 'epics'; } catch { return 'epics'; }
+  });
+  const pickLevelFilter = (v) => {
+    setLevelFilter(v);
+    try { localStorage.setItem('ovmg.opps.level', v); } catch { /* private mode */ }
+  };
   const [contactsList,  setContactsList]  = useState([]);
   useEffect(() => {
     getCompanies().then(cs => setCompaniesList((cs || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')))).catch(() => {});
@@ -1032,8 +1000,14 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
     else if (companySelect !== 'All') list = list.filter(o => dealCategoryMatchesSlug(o.dealCategory, companySelect));
     if (stageFilter !== 'All') list = list.filter(o => o.stage === stageFilter);
     if (typeFilter  !== 'All') list = list.filter(o => (o.kanbanType || '') === typeFilter);
+    // Level. An epic is an opportunity with no parent; a story has one. "Epics"
+    // also keeps stories whose parent is missing, so a broken link never hides
+    // a record from the only board that lists it.
+    const ids = new Set(opps.map(o => o.id));
+    if (levelFilter === 'epics')   list = list.filter(o => !o.parentId || !ids.has(o.parentId));
+    if (levelFilter === 'stories') list = list.filter(o => Boolean(o.parentId));
     return list;
-  }, [opps, companyFilter, companySelect, stageFilter, typeFilter]);
+  }, [opps, companyFilter, companySelect, stageFilter, typeFilter, levelFilter]);
 
   // Reusable Internal/External + Kanban/List control row. Called as a function
   // ({renderControlRow()}) rather than rendered as <ControlRow/> so it doesn't
@@ -1052,6 +1026,16 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
           ]}
         />
       )}
+      <FilterDropdown
+        label="Level"
+        value={levelFilter}
+        onChange={pickLevelFilter}
+        options={[
+          { v: 'epics',   l: 'Epics only' },
+          { v: 'stories', l: 'Stories only' },
+          { v: 'all',     l: 'Epics + stories' },
+        ]}
+      />
       <FilterDropdown
         label="Type"
         value={typeFilter}
@@ -1263,7 +1247,6 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               allOpps={opps}
               onOpenOpp={setQuickId}
               onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
-              onTasksChanged={load}
             />
           );
         })()}
@@ -1356,7 +1339,6 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
             allOpps={opps}
             onOpenOpp={setQuickId}
             onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
-            onTasksChanged={load}
           />
         );
       })()}
