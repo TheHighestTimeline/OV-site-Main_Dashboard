@@ -16,6 +16,7 @@ export const handler = async (event) => {
       last_contacted_at, owner, nextAction, nextActionDate, source,
       segment, introducedBy, bio, involvement, companyAddress,
       currentSummary, referrerId, referralEconomics,
+      linkedin, notes, companyIds,
     } = body;
     if (!id) return err(400, 'id is required');
 
@@ -44,10 +45,17 @@ export const handler = async (event) => {
     if (companyAddress !== undefined) update.companyAddress = companyAddress;
     if (currentSummary !== undefined) update.currentSummary = currentSummary;
     if (referralEconomics !== undefined) update.referralEconomics = referralEconomics;
+    if (linkedin       !== undefined) update.linkedin       = linkedin;
+    if (notes          !== undefined) update.notes          = notes;
 
     const fields = toAirtableFields(update, CONTACTS_MAP);
     // Referral link (self-link to another CRM contact). Empty string/null clears it.
+    // ONE referrer, never a list. A person is introduced by a single person, and
+    // referral economics are paid on that one link; a multi-link would make
+    // "who gets paid" ambiguous. The chain is still walkable one hop at a time.
     if (referrerId !== undefined) fields['Referred By'] = referrerId ? [referrerId] : [];
+    // Companies is a real multi-link: a contact can genuinely belong to several.
+    if (companyIds !== undefined) fields['Companies'] = Array.isArray(companyIds) ? companyIds : [];
     if (Object.keys(fields).length === 0) return ok({ id, updated: false });
 
     await airtableUpdate(TABLE(), id, fields);

@@ -8,6 +8,12 @@ import { companyNameMatchesSlug } from '../constants/roles.js';
 import ContactProfile from './ContactProfile.jsx';
 import CompanySnapshot from './CompanySnapshot.jsx';
 
+const addTa = {
+  width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
+  border: `1px solid ${C.cr3}`, background: C.bg2, color: C.ink9,
+  fontFamily: SANS, fontSize: 12.5, lineHeight: 1.5, resize: 'vertical', outline: 'none',
+};
+
 const COMPANIES = ['All', 'OVMG', 'OVM', 'OVTV', 'OVF', 'Amplify Artists', 'CarbonSponge', 'OVD', 'OVV'];
 const COMPANY_CHIP_SLUG = {
   OVMG: 'ovmg', OVM: 'ovm', OVTV: 'ovtv', OVF: 'ovf',
@@ -267,7 +273,18 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
   }
 
   function CAddForm({ prefill = {}, onSave }) {
-    const [f, setF] = useState({ name: '', email: '', phone: '', company: '', role: '', website: '', type: 'External', status: 'Active', relatesTo: [], ...prefill });
+    // Everything you would have in front of you when someone hands you a card
+    // or you get off a call. The old form captured six fields and sent you back
+    // into the record afterwards to add the rest, which is when it stops
+    // happening at all.
+    const [f, setF] = useState({
+      name: '', email: '', phone: '', company: '', role: '', linkedin: '',
+      type: 'External', status: 'Active', relatesTo: [],
+      owner: '', source: '', segment: '', introducedBy: '',
+      currentSummary: '', bio: '', notes: '',
+      nextAction: '', nextActionDate: '',
+      ...prefill,
+    });
     const fld = k => e => setF(p => ({ ...p, [k]: e.target.value }));
     const toggleRel = v => setF(p => ({ ...p, relatesTo: p.relatesTo.includes(v) ? p.relatesTo.filter(x => x !== v) : [...p.relatesTo, v] }));
     return (
@@ -285,6 +302,29 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
           <FR label="Type"><Sel value={f.type} onChange={fld('type')}><option>External</option><option>Internal</option></Sel></FR>
           <FR label="Status"><Sel value={f.status} onChange={fld('status')}><option>Active</option><option>Benched</option><option>Unknown</option></Sel></FR>
         </div>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+          <FR label="LinkedIn / website"><Inp value={f.linkedin} onChange={fld('linkedin')} placeholder="https://…" /></FR>
+          <FR label="Owner at OVMG"><Inp value={f.owner} onChange={fld('owner')} /></FR>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+          <FR label="Source"><Inp value={f.source} onChange={fld('source')} placeholder="Referral, inbound, event…" /></FR>
+          <FR label="Segment"><Inp value={f.segment} onChange={fld('segment')} /></FR>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+          <FR label="Next action"><Inp value={f.nextAction} onChange={fld('nextAction')} /></FR>
+          <FR label="Next action date"><Inp type="date" value={f.nextActionDate} onChange={fld('nextActionDate')} /></FR>
+        </div>
+        <FR label="Introduced by (free text)"><Inp value={f.introducedBy} onChange={fld('introducedBy')} /></FR>
+        <FR label="Current summary">
+          <textarea value={f.currentSummary} onChange={fld('currentSummary')} rows={2} style={addTa}
+            placeholder="Where this relationship stands, in a sentence or two." />
+        </FR>
+        <FR label="Bio">
+          <textarea value={f.bio} onChange={fld('bio')} rows={2} style={addTa} />
+        </FR>
+        <FR label="Notes">
+          <textarea value={f.notes} onChange={fld('notes')} rows={3} style={addTa} />
+        </FR>
         <FR label="Companies (deal category)">
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {COMPANIES.filter(x => x !== 'All').map(x => {

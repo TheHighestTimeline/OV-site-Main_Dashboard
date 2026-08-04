@@ -11,7 +11,9 @@ export const handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || '{}');
-    const { name, role, email, phone, status, type, relatesTo, owner, nextAction, nextActionDate, source } = body;
+    const { name, role, email, phone, status, type, relatesTo, owner, nextAction,
+            nextActionDate, source, linkedin, segment, introducedBy, bio, notes,
+            currentSummary, companyIds, referrerId } = body;
     if (!name) return err(400, 'name is required');
 
     const fields = toAirtableFields({
@@ -26,7 +28,18 @@ export const handler = async (event) => {
       nextAction:     nextAction     || '',
       nextActionDate: nextActionDate || '',
       source:         source         || '',
+      linkedin:       linkedin       || '',
+      segment:        segment        || '',
+      introducedBy:   introducedBy   || '',
+      bio:            bio            || '',
+      notes:          notes          || '',
+      currentSummary: currentSummary || '',
     }, CONTACTS_MAP);
+
+    // Linked records. Referred By is deliberately single: a person is introduced
+    // by one person, and referral economics are paid on that one link.
+    if (Array.isArray(companyIds) && companyIds.length) fields['Companies'] = companyIds;
+    if (referrerId) fields['Referred By'] = [referrerId];
 
     const record = await airtableCreate(TABLE(), fields);
     return ok({ id: record.id, name });

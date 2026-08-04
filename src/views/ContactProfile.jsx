@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { C, SERIF, SANS, MONO, RELATES, stBg, stFg, fmtR } from '../constants.js';
 import { Tag, Btn, Inp, Sel, FR, VoiceMic, Spinner } from '../components/UI.jsx';
+import { cacheClear } from '../lib/cache.js';
 import {
   getNotes, createNote, updateNote, deleteNote, updateContact, parseVoice,
   getDocumentsForContact, createDocument, updateDocument, getTasks, createTask, updateTask,
   getFoldersForContact, getFoldersForCompany, createFolder, getActivitiesForContact,
   getOpportunities, updateOpportunity, createOpportunity,
-  sendNcnda, airtableRecordUrl,
+  sendNcnda, airtableRecordUrl, getCompanies,
 } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import CompanySnapshot from './CompanySnapshot.jsx';
@@ -672,30 +673,76 @@ function OverviewTab({ c, setC, contactTableId, showToast, reloadContacts, onLog
   );
 }
 
+const taBox = {
+  width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
+  border: `1px solid ${C.cr3}`, background: C.bg2, color: C.ink9,
+  fontFamily: SANS, fontSize: 12.5, lineHeight: 1.5, resize: 'vertical', outline: 'none',
+};
+
 // ── Edit form ─────────────────────────────────────────────────────────────────
 function EditForm({ c, onDone, showToast }) {
   const isMobile = useIsMobile();
+  // The whole record, not a subset. The old form omitted name, company, summary,
+  // LinkedIn, notes and bio — which is why a placeholder surname could never be
+  // corrected and the rolling summary could not be edited at all.
   const [f, setF] = useState({
-    email: c.email || '', phone: c.phone || '', website: c.website || '',
+    name: c.name || '',
+    email: c.email || '', phone: c.phone || '', linkedin: c.linkedin || c.website || '',
     role: c.role || '', status: c.status || 'Active', type: c.type || 'External',
     relatesTo: Array.isArray(c.relatesTo) ? c.relatesTo : [],
     owner: c.owner || '', nextAction: c.nextAction || '', nextActionDate: c.nextActionDate || '', source: c.source || '',
+    segment: c.segment || '', introducedBy: c.introducedBy || '',
+    currentSummary: c.currentSummary || '', bio: c.bio || '',
+    involvement: c.involvement || '', notes: c.notes || '',
+    companyIds: Array.isArray(c.companyIds) ? c.companyIds : [],
   });
   const fld = k => e => setF(p => ({ ...p, [k]: e.target.value }));
   const toggleRel = v => setF(p => ({ ...p, relatesTo: p.relatesTo.includes(v) ? p.relatesTo.filter(x => x !== v) : [...p.relatesTo, v] }));
   const [saving, setSaving] = useState(false);
   const save = async () => {
+    if (!f.name.trim()) { showToast('A contact needs a name.'); return; }
     setSaving(true);
-    try { await updateContact(c.id, f); showToast('Contact updated ✓'); onDone(f); }
-    catch (e) { showToast('Failed: ' + e.message); setSaving(false); }
+    try {
+      await updateContact(c.id, { ...f, name: f.name.trim() });
+      // Names and companies are rendered all over the app from a cached contact
+      // list — Opportunities, Threads, task assignees. Without dropping the
+      // cache a rename shows here and stays stale everywhere else, which reads
+      // as the save having failed.
+      cacheClear('contacts');
+      showToast('Contact updated ✓');
+      onDone({ ...f, name: f.name.trim() });
+    } catch (e) { showToast('Failed: ' + e.message); setSaving(false); }
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <FR label="Full name">
+        <Inp value={f.name} onChange={fld('name')} placeholder="First Last" />
+      </FR>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
         <FR label="Email"><Inp value={f.email} onChange={fld('email')} /></FR>
         <FR label="Phone"><Inp value={f.phone} onChange={fld('phone')} /></FR>
       </div>
-      <FR label="Role / Title"><Inp value={f.role} onChange={fld('role')} /></FR>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+        <FR label="Role / Title"><Inp value={f.role} onChange={fld('role')} /></FR>
+        <FR label="LinkedIn / website"><Inp value={f.linkedin} onChange={fld('linkedin')} placeholder="https://…" /></FR>
+      </div>
+
+      <FR label="Company">
+        <CompanyPicker
+          selected={f.companyIds}
+          onChange={ids => setF(p => ({ ...p, companyIds: ids }))}
+        />
+      </FR>
+
+      <FR label="Current summary">
+        <textarea
+          value={f.currentSummary}
+          onChange={fld('currentSummary')}
+          rows={3}
+          placeholder="One or two sentences on where this relationship stands."
+          style={taBox}
+        />
+      </FR>
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
         <FR label="Status"><Sel value={f.status} onChange={fld('status')}><option>Active</option><option>Benched</option><option>Unknown</option></Sel></FR>
         <FR label="Type"><Sel value={f.type} onChange={fld('type')}><option>External</option><option>Internal</option></Sel></FR>
@@ -716,10 +763,102 @@ function EditForm({ c, onDone, showToast }) {
           })}
         </div>
       </FR>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10 }}>
+        <FR label="Segment"><Inp value={f.segment} onChange={fld('segment')} /></FR>
+        <FR label="Introduced by (free text)"><Inp value={f.introducedBy} onChange={fld('introducedBy')} /></FR>
+      </div>
+
+      <FR label="Bio">
+        <textarea value={f.bio} onChange={fld('bio')} rows={3} style={taBox} />
+      </FR>
+      <FR label="Involvement">
+        <textarea value={f.involvement} onChange={fld('involvement')} rows={2} style={taBox} />
+      </FR>
+      <FR label="Notes">
+        <textarea value={f.notes} onChange={fld('notes')} rows={3} style={taBox} />
+      </FR>
+
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
         <Btn v="gho" onClick={() => onDone(null)}>Cancel</Btn>
         <Btn onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</Btn>
       </div>
+    </div>
+  );
+}
+
+
+// ── Company picker ───────────────────────────────────────────────────────────
+// Multi-select, because a contact genuinely can belong to several. Distinct from
+// the "deal category" chips below it, which are OneVibe entities rather than the
+// company the person actually works for — those two were being conflated, which
+// is why there was no way to set an employer at all.
+function CompanyPicker({ selected = [], onChange }) {
+  const [all, setAll] = useState(null);
+  const [q, setQ] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    getCompanies()
+      .then(rows => { if (live) setAll(rows || []); })
+      .catch(() => { if (live) setAll([]); });
+    return () => { live = false; };
+  }, []);
+
+  const list = all || [];
+  const chosen = list.filter(x => selected.includes(x.id));
+  const matches = (q.trim()
+    ? list.filter(x => (x.name || '').toLowerCase().includes(q.trim().toLowerCase()))
+    : list
+  ).filter(x => !selected.includes(x.id))
+    .slice()
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+    .slice(0, 30);
+
+  return (
+    <div>
+      {chosen.length > 0 && (
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
+          {chosen.map(x => (
+            <button
+              key={x.id}
+              type="button"
+              onClick={() => onChange(selected.filter(id => id !== x.id))}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px',
+                borderRadius: 999, cursor: 'pointer', border: `1px solid ${C.acc}`,
+                background: C.accS, color: C.ink9, fontFamily: SANS, fontSize: 11.5,
+              }}
+            >{x.name} <span style={{ color: C.ink3, fontSize: 10 }}>✕</span></button>
+          ))}
+        </div>
+      )}
+      <Inp
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder={all === null ? 'Loading companies…' : 'Search companies'}
+      />
+      {q.trim() && (
+        <div style={{
+          marginTop: 5, maxHeight: 150, overflowY: 'auto',
+          border: `1px solid ${C.cr2}`, borderRadius: 8,
+        }}>
+          {!matches.length && (
+            <div style={{ padding: '9px 11px', fontSize: 12, color: C.ink3 }}>No company matches.</div>
+          )}
+          {matches.map(x => (
+            <button
+              key={x.id}
+              type="button"
+              onClick={() => { onChange([...selected, x.id]); setQ(''); }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left', cursor: 'pointer',
+                padding: '7px 11px', border: 'none', borderBottom: `1px solid ${C.cr2}`,
+                background: 'transparent', fontFamily: SANS, fontSize: 12.5, color: C.ink9,
+              }}
+            >{x.name}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
