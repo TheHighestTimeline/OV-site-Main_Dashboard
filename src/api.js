@@ -205,6 +205,11 @@ export const setToolOverride   = (userId, tab, action) =>
 export const sendNcnda         = data       =>
   req('ncnda-send', { method: 'POST', body: JSON.stringify(data) });
 
+// Read-only. Reports what it found and how sure it is; never writes a signed
+// date and never moves a stage — a human confirms.
+export const detectNcnda = (contactId, entity) =>
+  req(`ncnda-detect?contactId=${encodeURIComponent(contactId)}&entity=${encodeURIComponent(entity || '')}`);
+
 // Bug reports (§2.4)
 export const sendBugReport     = data       =>
   req('bug-report', { method: 'POST', body: JSON.stringify(data) });

@@ -7,7 +7,7 @@ import {
   getDocumentsForContact, createDocument, updateDocument, getTasks, createTask, updateTask,
   getFoldersForContact, getFoldersForCompany, createFolder, getActivitiesForContact,
   getOpportunities, updateOpportunity, createOpportunity,
-  sendNcnda, airtableRecordUrl, getCompanies,
+  sendNcnda, detectNcnda, airtableRecordUrl, getCompanies,
 } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import CompanySnapshot from './CompanySnapshot.jsx';
@@ -369,6 +369,10 @@ function TimelineTab({ c, notes }) {
 }
 
 // ── NCNDA compliance panel ────────────────────────────────────────────────────
+const CONF_COLOR = {
+  certain: '#2e7d32', high: '#2e7d32', medium: '#b7791f', low: '#b45309', none: '#9aa0a6',
+};
+
 function CompliancePanel({ c, showToast }) {
   const [docs, setDocs] = useState(null);
   const reloadDocs = useCallback(() => {
@@ -380,6 +384,20 @@ function CompliancePanel({ c, showToast }) {
   const [linkUrl,    setLinkUrl]    = useState('');
   const [linkSigned, setLinkSigned] = useState('');
   const [linkBusy,   setLinkBusy]   = useState(false);
+  const [checks,     setChecks]     = useState({});   // entity -> detection result
+  const [checking,   setChecking]   = useState(null);
+
+  const runCheck = async (entity) => {
+    setChecking(entity);
+    try {
+      const res = await detectNcnda(c.id, entity);
+      setChecks(p => ({ ...p, [entity]: res }));
+    } catch (err) {
+      showToast('Check failed: ' + err.message);
+    } finally {
+      setChecking(null);
+    }
+  };
 
   const entities = c.relatesTo || [];
   if (!entities.length) return null; // no entity relationships → nothing to track
@@ -444,6 +462,12 @@ function CompliancePanel({ c, showToast }) {
                 <a href={doc.driveLink} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.06em', textTransform: 'uppercase', color: C.ink3, textDecoration: 'none' }}>View ↗</a>
               )}
               <button
+                onClick={() => runCheck(e)}
+                disabled={checking === e}
+                title="Search documents, signature-service mail and Drive"
+                style={{ border: `1px solid ${C.cr3}`, borderRadius: 6, background: 'transparent', color: C.ink5, fontFamily: MONO, fontSize: 9, letterSpacing: '.05em', padding: '4px 8px', cursor: 'pointer' }}
+              >{checking === e ? '…' : '⌕ Check'}</button>
+              <button
                 onClick={() => setLinking(linking === e ? null : e)}
                 style={{ border: `1px solid ${C.cr3}`, borderRadius: 6, background: 'transparent', color: C.ink5, fontFamily: MONO, fontSize: 9, letterSpacing: '.05em', padding: '4px 8px', cursor: 'pointer' }}
               >{doc ? 'Relink' : 'Link URL'}</button>
@@ -454,6 +478,45 @@ function CompliancePanel({ c, showToast }) {
           </div>
         );
       })}
+
+      {/* Detection results. Confidence is shown on every line because the whole
+          risk here is a detector quietly saying "signed" — acting on an unsigned
+          NCNDA is the thing the gate exists to prevent. Nothing below is written
+          anywhere; it reports and you decide. */}
+      {Object.entries(checks).map(([entity, r]) => (
+        <div key={entity} style={{
+          padding: '10px 12px', marginBottom: 8, borderRadius: 10,
+          background: C.bg, border: `1px solid ${CONF_COLOR[r.confidence] || C.cr2}`,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3 }}>
+              {entity} check
+            </span>
+            <ConfBadge level={r.confidence} score={r.confidenceScore} />
+            <span style={{ flex: 1 }} />
+            <button onClick={() => setChecks(p => { const n = { ...p }; delete n[entity]; return n; })}
+              style={{ border: 'none', background: 'none', color: C.ink3, cursor: 'pointer', fontSize: 11 }}>✕</button>
+          </div>
+          <div style={{ fontSize: 12, color: C.ink8, marginTop: 6, lineHeight: 1.5 }}>{r.summary}</div>
+          {(r.evidence || []).length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {r.evidence.map((ev, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+                  <ConfBadge level={ev.confidence} small />
+                  <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, flexShrink: 0 }}>{ev.source}</span>
+                  <span style={{ flex: 1, fontSize: 11.5, color: C.ink5, lineHeight: 1.45 }}>{ev.detail}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {r.status !== 'signed' || r.confidence !== 'certain' ? (
+            <div style={{ fontSize: 11, color: C.ink3, marginTop: 8, lineHeight: 1.5 }}>
+              Nothing has been written. To make this count, use <strong>Link URL</strong> and set the
+              signed date — the stage gate in Threads only accepts a recorded date.
+            </div>
+          ) : null}
+        </div>
+      ))}
 
       {/* Manual linking. The SignWell path only covers NCNDAs we sent; anything
           signed before this dashboard existed, or countersigned outside it, has
@@ -480,6 +543,23 @@ function CompliancePanel({ c, showToast }) {
 
       <div style={{ fontSize: 11, color: C.ink3, marginTop: 2 }}>Auto-derived from “Related to” + linked NCNDA documents. Attach one in the Files tab, or paste its URL here.</div>
     </Card>
+  );
+}
+
+
+// The label is deliberately blunt. "Medium" next to a claim is the difference
+// between a detector you can act on and one you have to re-verify every time.
+function ConfBadge({ level, score, small }) {
+  const col = CONF_COLOR[level] || C.ink3;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+      padding: small ? '1px 6px' : '2px 8px', borderRadius: 999,
+      background: `${col}1f`, color: col, border: `1px solid ${col}55`,
+      fontFamily: MONO, fontSize: small ? 8 : 9, letterSpacing: '.06em', textTransform: 'uppercase',
+    }}>
+      {level || 'none'}{score != null && !small ? ` · ${score}%` : ''}
+    </span>
   );
 }
 

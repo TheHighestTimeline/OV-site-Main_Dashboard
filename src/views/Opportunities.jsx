@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { C, SERIF, SANS, MONO, stBg, stFg, prBg, prFg, fmtC, fmtD } from '../constants.js';
 import { Eyebrow, Tag, Spinner, Btn, Inp, Sel, FR, useConfirm, Modal, FilterDropdown, SkeletonKanban, EmptyState } from '../components/UI.jsx';
-import { cacheGet, cacheSet } from '../lib/cache.js';
+import { cacheGet, cacheSet, cacheClear } from '../lib/cache.js';
 import HierarchyEditor from './opportunities/HierarchyEditor.jsx';
 import LinksEditor from './opportunities/LinksEditor.jsx';
 import TaskRowEditor from './opportunities/TaskRowEditor.jsx';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
-         getAirtableSchema, airtableRecordUrl, getAppState, setAppState } from '../api.js';
+         getAirtableSchema, airtableRecordUrl, getAppState, setAppState,
+         createContact } from '../api.js';
 import { dealCategoryMatchesSlug, SLUG_TO_DEAL_CATEGORY, COMPANIES, COMPANY_META } from '../constants/roles.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 
@@ -337,6 +338,38 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       contacts:   [...(opp.contacts   || []), { id, name: ct?.name || '' }],
     });
   };
+  const [addingContact, setAddingContact] = useState(false);
+  const [ncBusy, setNcBusy] = useState(false);
+  const [nc, setNc] = useState({ name: '', email: '', company: '', role: '' });
+
+  const saveNewContact = async () => {
+    if (!nc.name.trim()) return;
+    setNcBusy(true);
+    try {
+      // Inherits the opportunity's entity so the new person lands on the right
+      // company tab instead of in an unfiltered pile.
+      const created = await createContact({
+        name: nc.name.trim(),
+        email: nc.email.trim(),
+        company: nc.company.trim(),
+        role: nc.role.trim(),
+        relatesTo: opp.entity ? [opp.entity] : [],
+      });
+      cacheClear('contacts');
+      save({
+        contactIds: [...(opp.contactIds || []), created.id],
+        contacts:   [...(opp.contacts   || []), { id: created.id, name: nc.name.trim() }],
+      });
+      showToast?.(`${nc.name.trim()} added and linked ✓`);
+      setNc({ name: '', email: '', company: '', role: '' });
+      setAddingContact(false);
+    } catch (e) {
+      showToast?.('Could not add contact: ' + e.message);
+    } finally {
+      setNcBusy(false);
+    }
+  };
+
   const removeContact = (id) => {
     save({
       contactIds: (opp.contactIds || []).filter(x => x !== id),
@@ -509,7 +542,40 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
               .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
               .map(c => <option key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</option>)}
           </select>
+          <button onClick={() => setAddingContact(v => !v)} style={hdrBtn}>
+            {addingContact ? 'Cancel' : '＋ Add contact'}
+          </button>
         </div>
+
+        {/* Someone new turns up mid-deal. Sending you to the CRM tab to add them
+            and back here to link them is why they end up recorded nowhere. */}
+        {addingContact && (
+          <div style={{ marginTop: 8, padding: '10px 12px', border: `1px solid ${C.acc}`, borderRadius: 9, background: C.bg2 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <div>
+                <span style={lbl}>Name *</span>
+                <input value={nc.name} onChange={e => setNc(p => ({ ...p, name: e.target.value }))} style={inp} autoFocus />
+              </div>
+              <div>
+                <span style={lbl}>Email</span>
+                <input value={nc.email} onChange={e => setNc(p => ({ ...p, email: e.target.value }))} style={inp} />
+              </div>
+              <div>
+                <span style={lbl}>Company</span>
+                <input value={nc.company} onChange={e => setNc(p => ({ ...p, company: e.target.value }))} style={inp} />
+              </div>
+              <div>
+                <span style={lbl}>Role</span>
+                <input value={nc.role} onChange={e => setNc(p => ({ ...p, role: e.target.value }))} style={inp} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+              <button onClick={saveNewContact} disabled={ncBusy || !nc.name.trim()} style={{
+                ...hdrBtn, borderColor: nc.name.trim() ? C.acc : C.cr3, color: nc.name.trim() ? C.acc : C.ink3,
+              }}>{ncBusy ? 'Adding…' : 'Create and link'}</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Hierarchy, links, tasks ── */}
