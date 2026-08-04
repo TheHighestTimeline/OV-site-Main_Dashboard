@@ -463,6 +463,11 @@ export const OPPORTUNITIES_MAP = {
   // Airtable API cannot edit an existing select's choices, so the board gets a
   // clean field of its own rather than nineteen values aliased into seven.
   lane:           'Lane',
+  // Epic / Story. Parent Opportunity is the real link; this is what a story with
+  // no parent yet is called, so new records can default to Story and be attached
+  // afterwards. A blank Level falls back to the link, which is how every record
+  // created before this field existed still reads correctly.
+  level:          'Level',
   dealCost:       'Deal Cost',      // what it costs us, vs dealValue = what it is worth
   contractsUrl:   'Contracts URL',
   extraLinks:     'Extra Links',    // JSON array of {label, url}; see the field description

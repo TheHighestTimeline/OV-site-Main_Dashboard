@@ -23,7 +23,7 @@ export const handler = async (event) => {
 
   const { name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
           nextStep, dataRoom, priority, kind, otherParty, probability,
-          goal, lane, paperworkStage, parentId, dealCost, contractsUrl,
+          goal, lane, paperworkStage, parentId, dealCost, contractsUrl, level,
           companyIds, contactIds, projectIds } = body;
   if (!name) return err(400, 'name is required');
 
@@ -32,6 +32,10 @@ export const handler = async (event) => {
     // A new card lands in Future Plans unless told otherwise: something nobody
     // has decided to work yet is exactly what that lane is for.
     obj.lane = lane || 'Future Plans';
+    // Story by default. Most new records are one thread inside something that
+    // already exists, and creating them as epics means every one has to be
+    // demoted by hand later.
+    obj.level = level || 'Story';
     if (goal)           obj.goal           = goal;
     if (paperworkStage) obj.paperworkStage = paperworkStage;
     if (contractsUrl)   obj.contractsUrl   = contractsUrl;

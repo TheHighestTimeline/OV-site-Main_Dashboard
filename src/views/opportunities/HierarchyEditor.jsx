@@ -50,7 +50,10 @@ export default function HierarchyEditor({
   const [pending, setPending] = useState(null);   // level chosen, parent not picked yet
   const [linkId,  setLinkId]  = useState('');
 
-  const level = opp.parentId ? 'story' : 'epic';
+  // Stored Level is authoritative; a blank one falls back to the link. This is
+  // what lets a story exist before it has been attached to an epic — the state
+  // every newly created record starts in.
+  const level = (opp.level ? String(opp.level).toLowerCase() : (opp.parentId ? 'story' : 'epic'));
   const shown = pending || level;
 
   const byId = useMemo(
@@ -84,9 +87,13 @@ export default function HierarchyEditor({
 
   function pickLevel(next) {
     if (next === level) { setPending(null); return; }
+    // Choosing Story without a parent is a legitimate end state, not a
+    // half-write: it is the record waiting to be filed under an epic.
+    if (next === 'story' && !opp.parentId) onSave({ level: 'Story' });
     if (next === 'epic') {
-      // Promote: clear the parent. Its own children are untouched.
-      onSave({ parentId: null });
+      // Promote: clear the parent AND record the level, or the next read would
+      // fall back to the link and flip it straight back to story.
+      onSave({ parentId: null, level: 'Epic' });
       setPending(null);
       return;
     }
@@ -97,7 +104,7 @@ export default function HierarchyEditor({
 
   function attachParent(id) {
     if (!id) return;
-    onSave({ parentId: id });
+    onSave({ parentId: id, level: 'Story' });
     setPending(null);
     setLinkId('');
   }
@@ -106,7 +113,7 @@ export default function HierarchyEditor({
     if (!id) return;
     // Linking is a write on the CHILD: it is the one gaining a parent, and that
     // is what converts it from an epic into a story.
-    onSave({ parentId: opp.id }, id);
+    onSave({ parentId: opp.id, level: 'Story' }, id);
     setLinkId('');
   }
 

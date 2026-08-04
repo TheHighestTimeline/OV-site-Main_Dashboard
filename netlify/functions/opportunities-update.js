@@ -22,7 +22,7 @@ export const handler = async (event) => {
 
   const { id, name, stage, dealValue, closeDate, notes, entity, type, kanbanType,
           nextStep, dataRoom, priority, kind, otherParty, probability, goal,
-          lane, paperworkStage, dealCost, contractsUrl, extraLinks,
+          lane, paperworkStage, dealCost, contractsUrl, extraLinks, level,
           companyIds, contactIds, projectIds, parentId } = body;
   if (!id) return err(400, 'id is required');
 
@@ -43,6 +43,7 @@ export const handler = async (event) => {
     // null, never '': Airtable reads '' on a singleSelect as a request to create
     // an option named "" and rejects the whole write.
     if (lane           !== undefined) update.lane           = lane || null;
+    if (level          !== undefined) update.level          = level || null;
     if (paperworkStage !== undefined) update.paperworkStage = paperworkStage || null;
     if (dealCost     !== undefined) update.dealCost     = dealCost != null && dealCost !== '' ? Number(dealCost) : null;
     if (contractsUrl !== undefined) update.contractsUrl = contractsUrl || '';
@@ -70,6 +71,10 @@ export const handler = async (event) => {
     if (parentId !== undefined) {
       if (parentId === id) return err(400, 'An opportunity cannot be its own parent.');
       fields['Parent Opportunity'] = parentId ? [parentId] : [];
+      // Gaining a parent makes it a story by definition. Clearing one does NOT
+      // force Epic: an unparented story is a real state, and that is exactly the
+      // record waiting to be attached.
+      if (parentId && level === undefined) fields['Level'] = 'Story';
     }
 
     if (Object.keys(fields).length === 0) return ok({ id, updated: false });

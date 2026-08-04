@@ -82,6 +82,10 @@ const PAPERWORK_STAGES = [
   'Contract Negotiation', 'Deal Finalization', 'Closed', 'Stalled', 'Archived',
 ];
 
+// Stored Level wins; a blank one falls back to the link, which is how every
+// record created before the field existed still reads correctly.
+const levelOf = (o) => o?.level || (o?.parentId ? 'Story' : 'Epic');
+
 const OPP_PRIORITIES = ['', 'High Priority', 'Medium Priority', 'Low Priority'];
 
 // ── Per-company pipeline lanes (2026-07 audit §3.2) ──────────────────────────
@@ -1003,9 +1007,13 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
     // Level. An epic is an opportunity with no parent; a story has one. "Epics"
     // also keeps stories whose parent is missing, so a broken link never hides
     // a record from the only board that lists it.
+    // "Epics" means the top of the board: real epics, plus any story that has
+    // not been attached to one yet, plus anything whose parent record is missing.
+    // Nothing is ever hidden while it waits to be filed.
     const ids = new Set(opps.map(o => o.id));
-    if (levelFilter === 'epics')   list = list.filter(o => !o.parentId || !ids.has(o.parentId));
-    if (levelFilter === 'stories') list = list.filter(o => Boolean(o.parentId));
+    const attached = o => o.parentId && ids.has(o.parentId);
+    if (levelFilter === 'epics')   list = list.filter(o => levelOf(o) === 'Epic' || !attached(o));
+    if (levelFilter === 'stories') list = list.filter(o => levelOf(o) === 'Story' && attached(o));
     return list;
   }, [opps, companyFilter, companySelect, stageFilter, typeFilter, levelFilter]);
 
