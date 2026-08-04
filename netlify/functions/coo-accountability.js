@@ -17,7 +17,7 @@ import { ok, err, CORS } from './_http.js';
 import { requireCooOrOps, entityFilterFor } from './_cooAccess.js';
 import { TB, listRecordsLenient } from './_airtable.js';
 import { listParticipations } from './_participations.js';
-import { LABEL_TO_ID, getStage, daysInStage } from './_stages.js';
+import { LABEL_TO_ID, getStage, daysInStage, isTerminalTaskStatus } from './_stages.js';
 
 const TASKS_TBL    = () => process.env.AIRTABLE_TABLE_TASKS    || TB.TASKS;
 const CONTACTS_TBL = () => process.env.AIRTABLE_TABLE_CONTACTS || TB.CONTACTS;
@@ -71,7 +71,7 @@ export const handler = async (event) => {
 
         const status  = t.fields?.['Status'] || '';
         const due     = t.fields?.['Due Date'] ? String(t.fields['Due Date']).slice(0, 10) : null;
-        const isDone  = status === 'Done';
+        const isDone  = isTerminalTaskStatus(status);
         const modified = t.fields?.['Last Modified Time'] || t.createdTime || null;
 
         for (const aid of assignees) {
@@ -102,7 +102,7 @@ export const handler = async (event) => {
             if (modified && String(modified).slice(0, 10) >= weekAgo) {
               byAssignee[key].completedThisWeek.push(row);
             }
-          } else if (status !== 'Canceled') {
+          } else {
             byAssignee[key].open.push(row);
             if (due && due < today) byAssignee[key].overdue.push(row);
           }

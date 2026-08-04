@@ -463,3 +463,33 @@ Zurlia contradiction appearing on Triage) is **unverified** and needs a pass onc
    the UI.
 8. Then build the two remaining detectors (§8.1, §8.2) with real filenames in
    hand.
+
+---
+
+## 14. Terminal task statuses (added 2026-08-04)
+
+Master Action Board's `Status` field has eleven options, not the eight in
+`src/constants.js`. The drift matters because the extra ones include `Archive`,
+and **`Archive` is how the board is actually cleared**: at the time of writing it
+is 138 of 200 records, and there is not a single `Done` record in the table.
+
+The code originally treated only `Done` and `Canceled` as finished, so 69 percent
+of the board counted as live work in Triage, the Today card, participation
+open-task counts, Accountability, and the daily reminder email.
+
+`TERMINAL_TASK_STATUSES` in `src/lib/stages.js` is now the single list:
+
+```
+Done · Complete · Canceled · Archive · Archived
+```
+
+Use `isTerminalTaskStatus(status)` rather than comparing strings. It is
+case-insensitive and trims. Every call site routes through it:
+`coo-triage`, `coo-threads-data`, `coo-signals`, `coo-signals-scan-drive`
+(including its filterByFormula), `coo-voice-apply`, `coo-accountability`,
+`tasks-focus`, `reminders-daily`, plus `Overview.jsx`, `ContactProfile.jsx` and
+`MyDay.jsx` on the client.
+
+**If someone adds a twelfth status option, classify it in that one list.** The
+whole reason this bug existed is that the answer to "is this task finished" was
+written out longhand in eleven different places and only two of them agreed.

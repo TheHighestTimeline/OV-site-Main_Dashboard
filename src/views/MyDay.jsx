@@ -378,7 +378,9 @@ export default function MyDay({ user, showToast }) {
     try {
       const res = await parseVoice(text, {
         section:   'my-day',
-        tasks:     tasks.filter(t => t.status !== 'Done'),
+        // Archived tasks are finished; feeding them to the parser as "active"
+        // makes it match spoken updates against work that closed weeks ago.
+        tasks:     tasks.filter(t => !['Done', 'Complete', 'Canceled', 'Archive', 'Archived'].includes(t.status)),
         contacts:  contacts.slice(0, 60),
         userName:  user.fullName,
       });

@@ -28,6 +28,7 @@ import { getSupabase } from './_supabase.js';
 import { getDrive, listPermissions, getFileMeta } from './_drive.js';
 import { TB, listRecords, updateRecords, esc, dateTime } from './_airtable.js';
 import { routeParticipation, participationsConfigured } from './_participations.js';
+import { TERMINAL_TASK_STATUSES } from './_stages.js';
 
 const SYNC_KEY   = 'drive_permissions';
 const SCAN_OWNER = process.env.COO_SCAN_USER_ID || null; // Clerk user id whose Google account is used
@@ -339,10 +340,17 @@ async function closeResolvedTasks(supabase, participationId, signalType) {
     return 0;
   }
 
+  // Every terminal status, not just Done. The live board clears work by setting
+  // Status to Archive, so a Done-only filter would keep "re-closing" tasks that
+  // were finished weeks ago and re-firing their timeline events.
+  const notTerminal = TERMINAL_TASK_STATUSES
+    .map(s => `{Status} != "${esc(s)}"`)
+    .join(',');
+
   const formula = `AND(` +
     `{Resolves On} = "${esc(signalType)}",` +
     `FIND("${esc(participationId)}", ARRAYJOIN({Participation})) > 0,` +
-    `{Status} != "Done"` +
+    notTerminal +
   `)`;
 
   let open = [];

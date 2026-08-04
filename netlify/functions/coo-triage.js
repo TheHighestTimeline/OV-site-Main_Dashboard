@@ -17,7 +17,7 @@ import { requireCooOrOps, entityFilterFor } from './_cooAccess.js';
 import { getSupabase } from './_supabase.js';
 import { TB, listRecords, listRecordsLenient } from './_airtable.js';
 import { listParticipations } from './_participations.js';
-import { LABEL_TO_ID, getStage, daysInStage, slaStatus } from './_stages.js';
+import { LABEL_TO_ID, getStage, daysInStage, slaStatus, isTerminalTaskStatus } from './_stages.js';
 
 const DOCS_TBL     = () => process.env.AIRTABLE_TABLE_DOCUMENTS || TB.DOCUMENTS;
 const TASKS_TBL    = () => process.env.AIRTABLE_TABLE_TASKS     || TB.TASKS;
@@ -169,8 +169,7 @@ export const handler = async (event) => {
     // one source of truth showing on two surfaces.
     const committedToday = taskRecs
       .filter(t => {
-        const s = t.fields?.['Status'] || '';
-        if (s === 'Done' || s === 'Canceled') return false;
+        if (isTerminalTaskStatus(t.fields?.['Status'])) return false;
         const due = t.fields?.['Due Date'];
         return due && String(due).slice(0, 10) <= today;
       })
@@ -199,8 +198,7 @@ export const handler = async (event) => {
     // Assigned out, still not Done, and nothing has moved in DELEGATED_DAYS.
     const delegated = taskRecs
       .filter(t => {
-        const s = t.fields?.['Status'] || '';
-        if (s === 'Done' || s === 'Canceled') return false;
+        if (isTerminalTaskStatus(t.fields?.['Status'])) return false;
         return arr(t.fields?.['Assigned To']).length > 0;
       })
       .map(t => {

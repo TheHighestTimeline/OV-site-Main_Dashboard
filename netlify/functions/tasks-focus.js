@@ -18,6 +18,7 @@
 import { ok, err, CORS } from './_http.js';
 import { requireAuth } from './_auth.js';
 import { TB, listRecordsLenient, updateRecords } from './_airtable.js';
+import { isTerminalTaskStatus } from './_stages.js';
 
 const TASKS_TBL = () => process.env.AIRTABLE_TABLE_TASKS || TB.TASKS;
 
@@ -175,10 +176,7 @@ async function readFocus() {
     };
   };
 
-  const live = records.filter(r => {
-    const s = r.fields?.['Status'] || '';
-    return s !== 'Done' && s !== 'Canceled';
-  });
+  const live = records.filter(r => !isTerminalTaskStatus(r.fields?.['Status']));
 
   const doingNow = live
     .filter(r => r.fields?.['Focus'] === 'Doing Now')

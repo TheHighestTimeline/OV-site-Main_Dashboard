@@ -7,7 +7,9 @@ import { airtableList, fromAirtableRecord, TASKS_MAP, CONTACTS_MAP } from './_ai
 import { recipients, sendHtmlEmail, sendWhatsApp, isScheduledOrSecret } from './_notify.js';
 
 const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const DONE_STATUSES = new Set(['Done', 'Canceled', 'Submitted']);
+// 'Archive' added 2026-08: it is how the board is actually cleared, so without
+// it this digest emailed 138 finished tasks every morning as if they were live.
+const DONE_STATUSES = new Set(['Done', 'Complete', 'Canceled', 'Submitted', 'Archive', 'Archived']);
 
 export const handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS };

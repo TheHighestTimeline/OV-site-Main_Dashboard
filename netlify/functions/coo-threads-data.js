@@ -22,7 +22,7 @@ import {
 import { listParticipations, participationsConfigured } from './_participations.js';
 import {
   inferLifecycle, LABEL_TO_ID, ID_TO_LABEL, getStage,
-  daysInStage, slaStatus, defaultStage,
+  daysInStage, slaStatus, defaultStage, isTerminalTaskStatus,
 } from './_stages.js';
 
 const OPPS_TBL     = () => process.env.AIRTABLE_TABLE_OPPORTUNITIES || TB.OPPORTUNITIES;
@@ -201,8 +201,7 @@ export const handler = async (event) => {
       });
       const today = new Date().toISOString().slice(0, 10);
       for (const t of taskRecords) {
-        const status = t.fields?.['Status'] || '';
-        if (status === 'Done' || status === 'Canceled') continue;
+        if (isTerminalTaskStatus(t.fields?.['Status'])) continue;
         for (const pid of arr(t.fields?.['Participation'])) {
           const p = byId[pid];
           if (!p) continue;

@@ -38,7 +38,10 @@ function isOverdue(dateStr) {
   return new Date(dateStr).getTime() < new Date().setHours(0, 0, 0, 0);
 }
 function isDone(status) {
-  return status === 'Done' || status === 'Complete' || status === 'Canceled';
+  // 'Archive' is how this board marks work finished, so it counts as done here
+  // too. Without it a contact's task list shows every task ever closed for them.
+  return ['done', 'complete', 'canceled', 'archive', 'archived']
+    .includes(String(status || '').trim().toLowerCase());
 }
 
 // ── Card wrapper ──────────────────────────────────────────────────────────────

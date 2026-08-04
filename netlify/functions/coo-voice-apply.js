@@ -18,6 +18,7 @@ import { requireCooOrOps } from './_cooAccess.js';
 import { getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 import { TB, listRecords, createRecords, updateRecords } from './_airtable.js';
+import { isTerminalTaskStatus } from './_stages.js';
 
 const TASKS_TBL = () => process.env.AIRTABLE_TABLE_TASKS || TB.TASKS;
 
@@ -150,7 +151,7 @@ export const handler = async (event) => {
         const all = await listRecords(TASKS_TBL(), { fields: ['Focus', 'Status'] });
         const current = all.filter(r =>
           r.fields?.['Focus'] === 'Doing Now' &&
-          !['Done', 'Canceled'].includes(r.fields?.['Status'] || ''),
+          !isTerminalTaskStatus(r.fields?.['Status']),
         ).length;
 
         let slots = Math.max(0, 5 - current);

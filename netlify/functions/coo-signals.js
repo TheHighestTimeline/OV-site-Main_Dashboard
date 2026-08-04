@@ -23,6 +23,7 @@ import { getUser } from './_auth.js';
 import { getSupabase } from './_supabase.js';
 import { TB, listRecordsLenient, updateRecords } from './_airtable.js';
 import { getParticipation } from './_participations.js';
+import { isTerminalTaskStatus } from './_stages.js';
 
 const TASKS_TBL = () => process.env.AIRTABLE_TABLE_TASKS || TB.TASKS;
 
@@ -170,8 +171,7 @@ async function closeMatchingTasks(supabase, signal, user) {
   }
 
   const open = candidates.filter(t => {
-    const status = t.fields?.['Status'] || '';
-    if (status === 'Done' || status === 'Canceled') return false;
+    if (isTerminalTaskStatus(t.fields?.['Status'])) return false;
     if ((t.fields?.['Resolves On'] || '') !== signal.signal_type) return false;
     return arr(t.fields?.['Participation']).includes(participationId);
   });

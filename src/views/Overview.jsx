@@ -29,7 +29,9 @@ export default function Overview({ user, showToast, setView, openOv, closeOv }) 
 
   // "Active" excludes terminal statuses — the number previously counted Done/
   // Canceled tasks too, so it never matched what the board showed.
-  const TERMINAL  = new Set(['done', 'complete', 'completed', 'canceled', 'cancelled']);
+  // 'archive' included: it is how this board is actually cleared. Without it
+  // the Active/Overdue counts on Overview read ~3x too high.
+  const TERMINAL  = new Set(['done', 'complete', 'completed', 'canceled', 'cancelled', 'archive', 'archived']);
   const active    = tasks.filter(t => !TERMINAL.has(String(t.status || '').toLowerCase().trim()));
   const overdue  = active.filter(t => { const d = dUntil(t.dueDate); return d !== null && d < 0; }).length;
   const myFirst  = user.fullName.split(' ')[0].toLowerCase();
