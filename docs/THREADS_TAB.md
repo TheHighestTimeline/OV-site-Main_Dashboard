@@ -595,3 +595,41 @@ and pick the person. The Supabase-backed surfaces (timeline, notes, briefs,
 queues) stay dark until `migrations/0002_coo_threads_schema.sql` is run — see
 section 15 — but the board, stages, triage and delegation all work off Airtable
 alone.
+
+---
+
+## 17. People shows every contact, not only tracked ones (2026-08-04)
+
+The People view was derived purely from participations. With none in the base it
+rendered *"No people yet"* over a CRM holding 114 of them, which reads as a
+broken tab rather than an empty one — and offered no path from a contact to a
+tracked relationship.
+
+**Checked first whether the pairing could be seeded automatically. It cannot.**
+The contact↔opportunity graph does not exist anywhere in the base:
+
+| Source | Contact + Opportunity pairs |
+|---|---|
+| `CRM Contacts.Opportunities` | 0 of 114 |
+| `Opportunities.Associated Contact` | 0 of 40 |
+| `Documents` (Contact + Deal/Opportunity) | 0 of 51 |
+| `Master Action Board` (Contact + Opportunity) | 14, all internal staff |
+
+The 14 task pairings are Tanner South and Carsten Gauslow against OVMG's own
+deals. They are owners, not counterparties, and seeding participations from them
+would assert that OVMG staff are parties to OVMG's own raises. No backfill was
+written.
+
+So People now folds in every CRM contact. A person with participations renders as
+before — stage, urgency, workstream chips. A person without renders as a dashed
+roster row with no stage and no urgency dot, because they genuinely have neither,
+plus an **Add to workstream** button. Untracked rows sort below everything
+including Closed and Archived: someone with no participation has no state to be
+behind on and must never displace someone who does.
+
+A scope filter (`Everyone` / `In a workstream` / `Not tracked`) with live counts
+keeps the roster from drowning the working set once the tracked list grows.
+
+`AddParticipant` now serves both directions. From Opportunities the workstream is
+fixed and you pick the person; from People the person is fixed and you pick the
+workstream. Whichever side is fixed renders as a header instead of a picker.

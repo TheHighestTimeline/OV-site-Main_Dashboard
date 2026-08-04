@@ -63,7 +63,7 @@ export default function OpportunitiesView({
       <AddParticipant
         workstream={ws}
         contacts={contacts}
-        takenContactIds={members.map(m => m.contactId).filter(Boolean)}
+        takenIds={members.map(m => m.contactId).filter(Boolean)}
         onClose={() => setAdding(false)}
         onDone={onChanged}
         showToast={showToast}

@@ -6,6 +6,10 @@
 // buckets and the brief has nothing to summarise. The tab shipped without this
 // form, which made it permanently empty and looked like a broken deploy.
 //
+// Two entry points, one component. From Opportunities the workstream is fixed
+// and you pick the person; from People the person is fixed and you pick the
+// workstream. Whichever side is fixed renders as a header rather than a picker.
+//
 // THE GOAL FIELD IS NOT DECORATION. The sprawl rule says a workstream exists
 // only if it has its own goal and its own counterparties; anything else belongs
 // on the board as a task. The server refuses a participation on a goal-less
@@ -31,28 +35,41 @@ const field = {
 const row = { display: 'flex', gap: 10, flexWrap: 'wrap' };
 
 export default function AddParticipant({
-  workstream, contacts = [], takenContactIds = [], onClose, onDone, showToast,
+  // Fix one side or the other. Fixing neither is not a supported call.
+  workstream = null, workstreams = null,
+  contact = null,    contacts = null,
+  takenIds = [],
+  onClose, onDone, showToast,
 }) {
-  const [search,    setSearch]    = useState('');
-  const [contactId, setContactId] = useState(null);
-  const [goal,      setGoal]      = useState('');
-  const [stage,     setStage]     = useState(CAPITAL_STAGES[0].label);
-  const [waitingOn, setWaitingOn] = useState('Us');
-  const [owner,     setOwner]     = useState('');
+  const pickingContact = !contact;
+
+  const [search,     setSearch]     = useState('');
+  const [contactId,  setContactId]  = useState(contact?.id || null);
+  const [wsId,       setWsId]       = useState(workstream?.id || '');
+  const [goal,       setGoal]       = useState('');
+  const [stage,      setStage]      = useState(CAPITAL_STAGES[0].label);
+  const [waitingOn,  setWaitingOn]  = useState('Us');
+  const [owner,      setOwner]      = useState('');
   const [nextAction,     setNextAction]     = useState('');
   const [nextActionDate, setNextActionDate] = useState('');
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState(null);
 
-  const needsGoal = !String(workstream?.goal || '').trim();
-  const taken = useMemo(() => new Set(takenContactIds), [takenContactIds]);
+  // Anything already paired is filtered out rather than shown and rejected: the
+  // server refuses the duplicate anyway, and offering a choice that cannot
+  // succeed is worse than not offering it.
+  const taken = useMemo(() => new Set(takenIds), [takenIds]);
 
-  // Someone already in this workstream is filtered out rather than shown and
-  // rejected: the server refuses the duplicate anyway, and offering a choice
-  // that cannot succeed is worse than not offering it.
+  const targetWorkstream = workstream
+    || (workstreams || []).find(w => w.id === wsId)
+    || null;
+
+  const needsGoal = Boolean(targetWorkstream) && !String(targetWorkstream.goal || '').trim();
+
   const matches = useMemo(() => {
+    if (!pickingContact) return [];
     const q = search.trim().toLowerCase();
-    const pool = contacts.filter(c => !taken.has(c.id));
+    const pool = (contacts || []).filter(c => !taken.has(c.id));
     const hits = q
       ? pool.filter(c =>
           (c.name || '').toLowerCase().includes(q) ||
@@ -63,12 +80,23 @@ export default function AddParticipant({
       .slice()
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
       .slice(0, 60);
-  }, [contacts, taken, search]);
+  }, [pickingContact, contacts, taken, search]);
 
-  const picked = contactId ? contacts.find(c => c.id === contactId) : null;
+  const picked = pickingContact
+    ? (contacts || []).find(c => c.id === contactId) || null
+    : contact;
+
+  const workstreamOptions = useMemo(
+    () => (workstreams || [])
+      .filter(w => !taken.has(w.id))
+      .slice()
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+    [workstreams, taken],
+  );
 
   async function submit() {
-    if (!contactId) { setError('Pick who is joining this workstream.'); return; }
+    if (!contactId)          { setError('Pick who is joining this workstream.'); return; }
+    if (!targetWorkstream)   { setError('Pick the workstream this relationship sits inside.'); return; }
     if (needsGoal && !goal.trim()) {
       setError('This workstream has no Goal yet. Give it one and it will be saved with the participation.');
       return;
@@ -78,16 +106,16 @@ export default function AddParticipant({
     try {
       await upsertParticipation({
         contactId,
-        workstreamId:   workstream.id,
+        workstreamId:   targetWorkstream.id,
         stage,
         waitingOn,
         owner:          owner.trim(),
         nextAction:     nextAction.trim(),
         nextActionDate: nextActionDate || null,
-        entity:         workstream.entity || '',
+        entity:         targetWorkstream.entity || '',
         ...(needsGoal ? { goal: goal.trim() } : {}),
       });
-      showToast?.(`${picked?.name || 'Contact'} added to ${workstream.name}`);
+      showToast?.(`${picked?.name || 'Contact'} added to ${targetWorkstream.name}`);
       onDone?.();
       onClose?.();
     } catch (e) {
@@ -97,31 +125,17 @@ export default function AddParticipant({
     }
   }
 
+  const ready = Boolean(contactId && targetWorkstream);
+
   return (
     <div>
       <p style={{ fontSize: 12.5, color: C.ink5, lineHeight: 1.6, margin: '0 0 14px' }}>
-        A participation is one person inside <strong style={{ color: C.ink9 }}>{workstream?.name}</strong>.
-        It carries their stage, which is why the same person can be NCNDA Signed here and
-        Initial Outreach somewhere else at the same time.
+        A participation is one person inside one workstream. It carries their stage, which is
+        why the same person can be NCNDA Signed on one and Initial Outreach on another at the
+        same moment, and both are true.
       </p>
 
-      {needsGoal && (
-        <div style={{ marginBottom: 14 }}>
-          <span style={label}>Goal for this workstream · required</span>
-          <textarea
-            value={goal}
-            onChange={e => setGoal(e.target.value)}
-            rows={2}
-            placeholder="What this workstream is actually trying to achieve"
-            style={{ ...field, resize: 'vertical', lineHeight: 1.5 }}
-          />
-          <div style={{ fontSize: 11, color: C.ink3, marginTop: 5, lineHeight: 1.5 }}>
-            A workstream needs its own goal and its own counterparties. Without one it is a
-            task, not a workstream, and the board stops being scannable.
-          </div>
-        </div>
-      )}
-
+      {/* ── Who ─────────────────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 14 }}>
         <span style={label}>Who</span>
         {picked ? (
@@ -137,10 +151,12 @@ export default function AddParticipant({
                 {[picked.company, picked.email].filter(Boolean).join(' · ') || 'No company or email on file'}
               </div>
             </div>
-            <button onClick={() => setContactId(null)} style={{
-              border: 'none', background: 'none', color: C.ink3, cursor: 'pointer',
-              fontFamily: MONO, fontSize: 10,
-            }}>change</button>
+            {pickingContact && (
+              <button onClick={() => setContactId(null)} style={{
+                border: 'none', background: 'none', color: C.ink3, cursor: 'pointer',
+                fontFamily: MONO, fontSize: 10,
+              }}>change</button>
+            )}
           </div>
         ) : (
           <>
@@ -157,7 +173,7 @@ export default function AddParticipant({
             }}>
               {!matches.length && (
                 <div style={{ padding: '14px 12px', fontSize: 12, color: C.ink3 }}>
-                  {contacts.length
+                  {(contacts || []).length
                     ? 'No contacts match, or everyone matching is already in this workstream.'
                     : 'No contacts loaded.'}
                 </div>
@@ -180,6 +196,48 @@ export default function AddParticipant({
           </>
         )}
       </div>
+
+      {/* ── Which workstream ────────────────────────────────────────────────── */}
+      <div style={{ marginBottom: 14 }}>
+        <span style={label}>Workstream</span>
+        {workstream ? (
+          <div style={{
+            padding: '9px 12px', borderRadius: 8, border: `1px solid ${C.cr2}`,
+            background: C.bg2, fontFamily: SANS, fontSize: 13.5, color: C.ink9,
+          }}>{workstream.name}</div>
+        ) : (
+          <select value={wsId} onChange={e => setWsId(e.target.value)} style={field} autoFocus={!pickingContact}>
+            <option value="">Pick a workstream…</option>
+            {workstreamOptions.map(w => (
+              <option key={w.id} value={w.id}>
+                {w.name}{w.entity ? ` — ${w.entity}` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        {!workstream && !workstreamOptions.length && (
+          <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 5, lineHeight: 1.5 }}>
+            Every workstream already has this person in it.
+          </div>
+        )}
+      </div>
+
+      {needsGoal && (
+        <div style={{ marginBottom: 14 }}>
+          <span style={label}>Goal for this workstream · required</span>
+          <textarea
+            value={goal}
+            onChange={e => setGoal(e.target.value)}
+            rows={2}
+            placeholder="What this workstream is actually trying to achieve"
+            style={{ ...field, resize: 'vertical', lineHeight: 1.5 }}
+          />
+          <div style={{ fontSize: 11, color: C.ink3, marginTop: 5, lineHeight: 1.5 }}>
+            A workstream needs its own goal and its own counterparties. Without one it is a
+            task, not a workstream, and the board stops being scannable.
+          </div>
+        </div>
+      )}
 
       <div style={{ ...row, marginBottom: 14 }}>
         <div style={{ flex: 1, minWidth: 150 }}>
@@ -230,11 +288,11 @@ export default function AddParticipant({
           background: 'transparent', color: C.ink5, fontFamily: SANS, fontSize: 13,
           cursor: saving ? 'default' : 'pointer',
         }}>Cancel</button>
-        <button onClick={submit} disabled={saving || !contactId} style={{
+        <button onClick={submit} disabled={saving || !ready} style={{
           padding: '9px 18px', borderRadius: 8, border: 'none',
-          background: contactId ? C.acc : C.cr3, color: '#fff',
+          background: ready ? C.acc : C.cr3, color: '#fff',
           fontFamily: SANS, fontSize: 13, fontWeight: 600,
-          cursor: saving || !contactId ? 'default' : 'pointer',
+          cursor: saving || !ready ? 'default' : 'pointer',
           opacity: saving ? 0.6 : 1,
         }}>{saving ? 'Adding…' : 'Add to workstream'}</button>
       </div>
