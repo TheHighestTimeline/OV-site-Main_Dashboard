@@ -93,7 +93,24 @@ them and stop writing to them rather than deleting. Additive-only cuts both ways
 no policies (matching the existing service-role model). Idempotent, safe to
 re-run.
 
-### 1e. Assign Clerk roles and env vars
+### 1e. Turn the scheduled jobs on, one at a time
+
+**All four Threads cron schedules ship commented out in `netlify.toml`.** The
+tab is fully usable without them: Threads → Queues → "Run a scan now" triggers
+each detector by hand, which is how you watch what one actually writes before it
+runs unattended.
+
+Enable them in this order, uncommenting one block per deploy:
+
+1. `coo-signals-scan-drive` — writes to Supabase, plus closes tasks it matches
+2. `coo-signals-scan-gmail` — writes to Supabase only, proposes nothing else
+3. `coo-stalled-scan` — writes to Participations only, no-ops until it exists
+4. `coo-ingest-gmail` — **last.** The only Threads job that writes to the live
+   Airtable base unattended (one Activity row per thread per day). Set
+   `COO_SCAN_USER_ID` before enabling it, or it authenticates as the shared
+   `GMAIL_REFRESH_TOKEN` account rather than yours.
+
+### 1f. Assign Clerk roles and env vars
 
 - Roles: `coo` (Tanner, Carsten), `ops` (Ivan, Sofia). Admins pass every gate.
 - Env: see `.env.example`. The ones that matter most are
@@ -422,6 +439,8 @@ Zurlia contradiction appearing on Triage) is **unverified** and needs a pass onc
 
 ## 10. Exact next step for whoever picks this up
 
+0. **The cron schedules are off.** That is deliberate, not an oversight — see
+   §1e. Use Queues → "Run a scan now" until you have seen each job's output.
 1. Do §1 in order: snapshot, create Participations, add the fields, run the
    migration, set env vars and roles.
 2. Open Threads. It should render the "not connected yet" panel until
