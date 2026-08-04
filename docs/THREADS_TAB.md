@@ -770,3 +770,48 @@ Waiting On last.
   rather than to epics. Collapsing the two is a later decision, not a silent one.
 - Triage, Pipeline and Accountability still read participations, so they are
   unaffected by this change.
+
+---
+
+## 21. What a participation is, and why it stays (2026-08-04)
+
+Tanner, reasonably: *"I just can't really remember what the participation portion
+of this is for."*
+
+**A participation is not the event log.** The log is `coo_events` in Supabase and
+it keys off a person, a deal, OR a sub-opportunity — the story timeline uses the
+sub-opportunity id and never touches a participation.
+
+**A participation is one person's paperwork inside one thread.** Stage, evidence
+gate, days-in-stage, stage-change history.
+
+It predates sub-opportunities and was the original answer to "Greg is NCNDA
+Signed here and Initial Outreach there". Sub-opportunities now answer that too,
+which is why the two looked redundant. They are not quite: a story tracks the
+thread, a participation tracks each person on it. **Two people on one email chain
+sign weeks apart**, and that is the case the per-person row exists for.
+
+Decision (Tanner, 2026-08-04): **keep both, make the lower layer invisible.**
+
+- `coo-story-save.js` is now the only write path for a sub-opportunity. Saving one
+  reconciles its paperwork rows: a contact added to the thread gets a row opened
+  at the thread's current stage (so adding a second person to a thread already at
+  NCNDA Sent does not reset them to the beginning); a contact removed has their
+  row marked **Inactive, never deleted** — the stage history and evidence would go
+  with it, and taking someone off a thread is routinely a correction.
+- The story detail pane lists each person with their own stage dropdown. Changing
+  it routes through `coo-stage-advance`, so the NCNDA evidence gate and the stage
+  history still apply per person.
+- Nobody edits a participation directly. There is no UI for it and there should
+  not be one.
+
+The thread-level `Paperwork Stage` on the story stays as the headline tag; the
+per-person rows underneath are the truth. Triage, Pipeline, Accountability and
+the brief continue to read participations unchanged.
+
+### Rules that survived this
+
+- A story with no Goal still gets no paperwork rows. The save succeeds and says
+  why, rather than half-failing.
+- `entity` is written as `null`, never `''` — Airtable reads an empty string on a
+  singleSelect as a request to create an option named `""` and rejects the write.

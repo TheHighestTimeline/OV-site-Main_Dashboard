@@ -9,7 +9,7 @@
 
 import { useState, useMemo } from 'react';
 import { C, SANS, MONO } from '../../constants.js';
-import { createOpportunity, updateOpportunity } from '../../api.js';
+import { saveStory } from '../../api.js';
 
 const LANES = ['Future Plans', 'Submitted', 'In Work', 'Waiting On', 'Closing', 'Done', 'Archive'];
 const PAPERWORK = [
@@ -73,26 +73,24 @@ export default function StoryForm({ story, parent, contacts = [], onClose, onDon
     setSaving(true);
     setError(null);
     try {
-      const payload = {
+      const res = await saveStory({
+        id:             isEdit ? story.id : undefined,
+        parentId:       isEdit ? undefined : parent.id,
         name:           name.trim(),
         lane,
         paperworkStage: pw,
         goal:           goal.trim(),
         contactIds:     [...picked],
-      };
-      if (isEdit) {
-        await updateOpportunity(story.id, payload);
-      } else {
-        await createOpportunity({
-          ...payload,
-          parentId: parent.id,
-          // Inherited so the sub-opportunity lands under the same entity tab and
-          // the same Deal/Workstream split as the deal it belongs to.
-          entity: parent.entity || undefined,
-          kind:   parent.kind   || undefined,
-        });
-      }
-      showToast?.(isEdit ? 'Saved' : `${name.trim()} added`);
+        // Inherited so the sub-opportunity lands under the same entity tab and
+        // the same Deal/Workstream split as the deal it belongs to.
+        entity: isEdit ? undefined : (parent?.entity || undefined),
+        kind:   isEdit ? undefined : (parent?.kind   || undefined),
+      });
+
+      // The save succeeded either way; the sync note explains why nobody got a
+      // paperwork row when that happens, rather than failing silently.
+      if (res?.sync?.skipped) showToast?.(res.sync.skipped);
+      else showToast?.(isEdit ? 'Saved' : `${name.trim()} added`);
       onDone?.();
       onClose?.();
     } catch (e) {

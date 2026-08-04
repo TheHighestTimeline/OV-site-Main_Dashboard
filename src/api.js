@@ -330,6 +330,13 @@ export const getThreadsData = () => req('coo-threads-data');
 export const upsertParticipation = (data) =>
   req('coo-participation-upsert', { method: 'POST', body: JSON.stringify(data) });
 
+// Sub-opportunities ("stories"). Goes through its own endpoint rather than
+// opportunities-create/update because saving one also reconciles the per-person
+// paperwork rows underneath it: adding someone to a thread opens their row,
+// removing them marks it Inactive.
+export const saveStory = (data) =>
+  req('coo-story-save', { method: 'POST', body: JSON.stringify(data) });
+
 // Proposed links, matched from the CRM's own company names. GET writes nothing;
 // POST writes only what the user ticked. Inferences propose, they never apply.
 export const getParticipationSuggestions = () => req('coo-participation-suggest');

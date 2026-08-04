@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { C, SERIF, SANS, MONO } from '../../constants.js';
-import { updateOpportunity, getTasks } from '../../api.js';
+import { updateOpportunity, getTasks, advanceStage } from '../../api.js';
 import Timeline from '../../components/Timeline.jsx';
 import { Empty, EntityChip } from './shared.jsx';
 
@@ -68,6 +68,17 @@ export default function StoryDetail({ story, contacts = [], onChanged, showToast
     return (story?.contactIds || []).map(id => byId[id]).filter(Boolean);
   }, [story, contacts]);
 
+  // Active paperwork rows, keyed by who they belong to. Inactive ones are people
+  // taken off the thread; their history is kept but they are not shown.
+  const byContact = useMemo(() => {
+    const out = {};
+    for (const p of story?.participations || []) {
+      if (p.status === 'Inactive') continue;
+      if (p.contactId) out[p.contactId] = p;
+    }
+    return out;
+  }, [story]);
+
   if (!story) {
     return (
       <Empty
@@ -86,6 +97,26 @@ export default function StoryDetail({ story, contacts = [], onChanged, showToast
     } catch (e) {
       revert?.();
       showToast?.(`Could not save: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Move one person's paperwork. Always through coo-stage-advance, never a plain
+   * field write, because that endpoint is where the evidence gate lives: NCNDA
+   * Signed and Closed need a Documents record with a Signed Date, and a refusal
+   * comes back as a 409 with a message worth showing verbatim.
+   */
+  async function advance(participationId, toStage) {
+    setBusy(true);
+    try {
+      await advanceStage({ participationId, toStage });
+      onChanged?.();
+    } catch (e) {
+      showToast?.(e.code === 'EVIDENCE_REQUIRED'
+        ? e.message
+        : `Could not move that stage: ${e.message}`);
     } finally {
       setBusy(false);
     }
@@ -160,17 +191,21 @@ export default function StoryDetail({ story, contacts = [], onChanged, showToast
 
         {people.length > 0 && (
           <div style={{ marginTop: 10 }}>
-            <span style={label}>On this thread</span>
-            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            <span style={label}>On this thread · paperwork per person</span>
+            {/* Per person, because two people on one email can sign weeks apart.
+                The thread-level tag above is the headline; these are the truth. */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {people.map(p => (
-                <span key={p.id} title={p.email || ''} style={{
-                  display: 'inline-flex', alignItems: 'center', padding: '2px 9px',
-                  borderRadius: 999, background: C.bg2, border: `1px solid ${C.cr2}`,
-                  color: C.ink5, fontFamily: SANS, fontSize: 11.5,
-                }}>{p.name || '(no name)'}</span>
+                <PersonRow
+                  key={p.id}
+                  person={p}
+                  participation={byContact[p.id]}
+                  busy={busy}
+                  onAdvance={advance}
+                />
               ))}
-              <EntityChip entity={story.entity} />
             </div>
+            <div style={{ marginTop: 6 }}><EntityChip entity={story.entity} /></div>
           </div>
         )}
       </div>
@@ -213,6 +248,55 @@ export default function StoryDetail({ story, contacts = [], onChanged, showToast
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', paddingTop: 10 }}>
         <Timeline workstreamId={story.id} onNoteAdded={onChanged} />
       </div>
+    </div>
+  );
+}
+
+// ── One person's paperwork row ───────────────────────────────────────────────
+
+function PersonRow({ person, participation, busy, onAdvance }) {
+  const stage = participation?.stageLabel || '';
+  const sla   = participation?.slaStatus;
+  const days  = participation?.daysInStage;
+  const loud  = sla === 'overdue' || sla === 'escalate';
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span
+        title={person.email || ''}
+        style={{
+          flex: 1, minWidth: 0, fontFamily: SANS, fontSize: 12, color: C.ink8,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}
+      >{person.name || '(no name)'}</span>
+
+      {days != null && (
+        <span style={{
+          fontFamily: MONO, fontSize: 9, flexShrink: 0,
+          color: loud ? C.red : C.ink3, fontWeight: loud ? 700 : 400,
+        }}>{days}d</span>
+      )}
+
+      {participation ? (
+        <select
+          value={stage}
+          disabled={busy}
+          onChange={e => onAdvance(participation.id, e.target.value)}
+          style={{
+            width: 150, flexShrink: 0, padding: '4px 7px', borderRadius: 6,
+            border: `1px solid ${stage === 'NCNDA Signed' || stage === 'Closed' ? C.grn : C.cr3}`,
+            background: C.bg,
+            color: stage === 'NCNDA Signed' || stage === 'Closed' ? C.grn : C.ink9,
+            fontFamily: SANS, fontSize: 11.5, outline: 'none',
+          }}
+        >
+          {PAPERWORK.map(s => <option key={s}>{s}</option>)}
+        </select>
+      ) : (
+        <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, flexShrink: 0, width: 150 }}>
+          no paperwork row
+        </span>
+      )}
     </div>
   );
 }
