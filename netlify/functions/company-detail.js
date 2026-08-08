@@ -53,6 +53,8 @@ export const handler = async (event) => {
       stage:       f['Stage'] || '',
       website:     f['Website'] || '',
       followUpDate: f['Follow Up Date'] || '',
+      // The one-line "what they actually do", which the snapshot's bio leads on.
+      subjectDescriptor: f['Subject Descriptor'] || '',
       notes: {
         callsNotes: f['Calls/Notes'] || '',
         summary:    f['Summary'] || '',
@@ -100,9 +102,13 @@ export const handler = async (event) => {
       }));
 
     // Recent activities about this company
+    // Newest first, and deep enough to carry a few months of weekly history —
+    // the company Thread groups these by week, and a slice taken in Airtable's
+    // arbitrary order would drop whole weeks out of the middle of the story.
     const activities = allActivities
       .filter(r => (r.fields['Company'] || []).includes(companyId))
-      .slice(0, 25)
+      .sort((a, b) => String(b.fields['Date'] || '').localeCompare(String(a.fields['Date'] || '')))
+      .slice(0, 80)
       .map(r => ({
         id:        r.id,
         title:     r.fields['Title'] || '',

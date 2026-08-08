@@ -7,6 +7,7 @@ import LinksEditor from './opportunities/LinksEditor.jsx';
 import TaskRowEditor from './opportunities/TaskRowEditor.jsx';
 import TaskKanban from './opportunities/TaskKanban.jsx';
 import Suggestions, { rememberRejected, forgetRejected } from '../components/Suggestions.jsx';
+import DriveSuggestions from '../components/DriveSuggestions.jsx';
 import ThreadTab from './opportunities/ThreadTab.jsx';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
@@ -899,6 +900,10 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
           showToast?.(`${item.name} linked ✓`);
         }}
       />
+
+      {/* Drive files carrying this deal's name, or a counterparty's, with no
+          Documents row yet. A count you can ignore until you want to file. */}
+      <DriveSuggestions kind="opportunity" id={opp.id} onLinked={onTasksChanged} showToast={showToast} />
 
       {/* ── Hierarchy, links, tasks ── */}
       {visible.hierarchy !== false && (

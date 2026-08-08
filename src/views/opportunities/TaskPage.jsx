@@ -14,6 +14,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { C, SANS, MONO } from '../../constants.js';
 import { updateTask, deleteTask } from '../../api.js';
+import DriveSuggestions from '../../components/DriveSuggestions.jsx';
 
 const STATUSES = ['Not Started', 'Submitted', 'In Progress', 'Waiting On Response', 'On Hold', 'Needs Attention', 'Done', 'Complete', 'Canceled', 'Archive'];
 const PRIORITIES = ['High', 'Medium', 'Low'];
@@ -217,6 +218,9 @@ export default function TaskPage({
         {/* ── Links ───────────────────────────────────────────────────── */}
         <div style={{ marginBottom: 14 }}>
           <span style={lbl}>Documents and links</span>
+          {/* Drive files named after this task or its deal, offered as a count
+              rather than a list — accepting one appends it to the links below. */}
+          <DriveSuggestions kind="task" id={task.id} onLinked={onChanged} showToast={showToast} />
           {links.length > 0 && (
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 7 }}>
               {links.map((l, i) => (

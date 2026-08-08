@@ -82,3 +82,34 @@ export async function listFolderFiles(drive, folderId, { since } = {}) {
   } while (pageToken);
   return out;
 }
+
+/**
+ * Recently touched files across everything the account can see.
+ *
+ * The link suggester needs "what is new in the Drive", not "what is in this
+ * folder" — a document nobody has filed yet is by definition not in a folder we
+ * are already watching. Folders themselves are excluded: you link a document,
+ * not a directory.
+ */
+export async function listRecentFiles({ userId, drive, since = null, limit = 250 } = {}) {
+  const d = drive || await getDrive(userId);
+  const clauses = ["mimeType != 'application/vnd.google-apps.folder'", 'trashed = false'];
+  if (since) clauses.push(`modifiedTime > '${new Date(since).toISOString()}'`);
+
+  const out = [];
+  let pageToken;
+  do {
+    const { data } = await d.files.list({
+      q: clauses.join(' and '),
+      fields: 'nextPageToken, files(id,name,mimeType,webViewLink,modifiedTime,createdTime,owners(emailAddress))',
+      orderBy: 'modifiedTime desc',
+      pageSize: Math.min(100, limit - out.length),
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
+      pageToken,
+    });
+    out.push(...(data.files || []));
+    pageToken = data.nextPageToken;
+  } while (pageToken && out.length < limit);
+  return out.slice(0, limit);
+}

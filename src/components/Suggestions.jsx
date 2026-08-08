@@ -58,6 +58,7 @@ export default function Suggestions({
   onLink,           // (item) => Promise — the caller does the actual write
   emptyLabel = null,
   collapsed = false, // render as a count button that opens a review screen
+  noun = 'link',     // what the collapsed button counts: "3 suggested drive links"
 }) {
   const [items,  setItems]  = useState(null);
   const [busyId, setBusyId] = useState(null);
@@ -139,7 +140,7 @@ export default function Suggestions({
         padding: '6px 13px', borderRadius: 999, cursor: 'pointer',
         border: `1px dashed ${C.acc}88`, background: `${C.acc}0d`, color: C.acc,
         fontFamily: MONO, fontSize: 10, letterSpacing: '.05em', fontWeight: 600,
-      }}>⌁ {visible.length} suggested {visible.length === 1 ? 'link' : 'links'} — review</button>
+      }}>⌁ {visible.length} suggested {noun}{visible.length === 1 ? '' : 's'} — review</button>
     );
   }
 

@@ -3,6 +3,7 @@ import { C, SERIF, SANS, MONO, RELATES, stBg, stFg, fmtR } from '../constants.js
 import { Tag, Btn, Inp, Sel, FR, VoiceMic, Spinner } from '../components/UI.jsx';
 import { cacheClear } from '../lib/cache.js';
 import Suggestions from '../components/Suggestions.jsx';
+import DriveSuggestions from '../components/DriveSuggestions.jsx';
 import {
   getNotes, createNote, updateNote, deleteNote, updateContact, parseVoice,
   getDocumentsForContact, createDocument, updateDocument, getTasks, createTask, updateTask,
@@ -268,6 +269,10 @@ function DealsTab({ c, showToast, isAdmin }) {
           load();
         }}
       />
+
+      {/* Documents sitting in the Drive with this person's name on them and no
+          Documents row. Files them against the contact when you accept one. */}
+      <DriveSuggestions kind="contact" id={c.id} onLinked={load} showToast={showToast} />
 
       {showLink && (
         <Card style={{ background: C.bg2 }}>

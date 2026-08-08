@@ -3,6 +3,10 @@ import { C, SERIF, SANS, MONO, fmtR } from '../constants.js';
 import { Tag, Btn, Spinner } from '../components/UI.jsx';
 import { getCompanyDetail } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
+import CompanyThread from './CompanyThread.jsx';
+import DriveSuggestions from '../components/DriveSuggestions.jsx';
+
+const EXPAND_KEY = 'ovmg.company.expanded';
 
 const PRIORITY_COLORS = { High: C.red, Medium: C.yel, Low: C.ink5 };
 
@@ -43,6 +47,16 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
   const [data, setData]   = useState(null);
   const [error, setError] = useState(null);
   const [coTab, setCoTab] = useState('overview');
+  // Shrunk by default, expanded when you are actually working the record.
+  // Remembered, because which one you want is a habit rather than a per-company
+  // decision — re-expanding on every open would be the whole annoyance again.
+  const [expanded, setExpanded] = useState(() => {
+    try { return localStorage.getItem(EXPAND_KEY) === '1'; } catch { return false; }
+  });
+  const toggleExpand = () => setExpanded(v => {
+    try { localStorage.setItem(EXPAND_KEY, v ? '0' : '1'); } catch { /* private mode */ }
+    return !v;
+  });
 
   useEffect(() => {
     const esc = e => { if (e.key === 'Escape') onClose(); };
@@ -50,14 +64,23 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
     return () => document.removeEventListener('keydown', esc);
   }, [onClose]);
 
+  const [nonce, setNonce] = useState(0);
+  // Filing a document from the suggester changes what this modal is showing, so
+  // it needs a way to re-read without closing and re-opening.
+  const reload = () => setNonce(n => n + 1);
+
   useEffect(() => {
     let alive = true;
-    setData(null); setError(null);
+    setError(null);
     getCompanyDetail(companyId)
       .then(d => { if (alive) setData(d); })
       .catch(e => { if (alive) setError(e.message); });
     return () => { alive = false; };
-  }, [companyId]);
+  }, [companyId, nonce]);
+
+  // Clearing on a company change only — a refresh should not blank the panel
+  // you are reading.
+  useEffect(() => { setData(null); }, [companyId]);
 
   const { folderGroups, unfiledDocs } = useMemo(() => {
     if (!data) return { folderGroups: [], unfiledDocs: [] };
@@ -89,19 +112,28 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
   );
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 185, display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 22 }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 185, display: 'grid', placeItems: isMobile || expanded ? 'stretch' : 'center', padding: isMobile || expanded ? 0 : 22 }}>
       <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(14,16,20,.6)', backdropFilter: 'blur(4px)' }} />
       <div style={{
         position: 'relative', background: C.bg,
-        borderRadius: isMobile ? 0 : 18,
-        width: '100%', maxWidth: isMobile ? '100%' : 760,
-        height: isMobile ? '100vh' : 'auto', maxHeight: isMobile ? '100vh' : '90vh',
+        borderRadius: isMobile || expanded ? 0 : 18,
+        width: '100%', maxWidth: isMobile ? '100%' : expanded ? '100%' : 760,
+        height: isMobile || expanded ? '100vh' : 'auto',
+        maxHeight: isMobile || expanded ? '100vh' : '90vh',
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
         boxShadow: '0 30px 80px rgba(0,0,0,.5)',
       }}>
         {/* Header */}
         <div style={{ padding: isMobile ? '18px 16px 14px' : '22px 26px 16px', borderBottom: `1px solid ${C.cr2}`, flexShrink: 0 }}>
-          <button onClick={onClose} title="Back to contact" style={{ position: 'absolute', top: 14, right: 18, background: 'none', border: 'none', fontSize: 26, color: C.ink3, cursor: 'pointer', lineHeight: 1 }}>×</button>
+          <div style={{ position: 'absolute', top: 14, right: 18, display: 'flex', alignItems: 'center', gap: 4 }}>
+            {!isMobile && (
+              <button onClick={toggleExpand} title={expanded ? 'Shrink' : 'Expand to full screen'}
+                style={{ background: 'none', border: `1px solid ${C.cr3}`, borderRadius: 6, color: C.ink5, fontFamily: MONO, fontSize: 11, padding: '3px 8px', cursor: 'pointer', lineHeight: 1.4 }}>
+                {expanded ? '⤡ shrink' : '⤢ expand'}
+              </button>
+            )}
+            <button onClick={onClose} title="Close" style={{ background: 'none', border: 'none', fontSize: 26, color: C.ink3, cursor: 'pointer', lineHeight: 1 }}>×</button>
+          </div>
           <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Company</div>
           <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 22 : 28, letterSpacing: '-.025em', margin: 0, color: C.ink9, lineHeight: 1.05 }}>
             {co?.name || companyName || 'Company'}
@@ -116,9 +148,15 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
               {co.website && <a href={co.website} target="_blank" rel="noopener noreferrer" style={{ fontFamily: MONO, fontSize: 10, color: C.acc, textDecoration: 'none' }}>{hostLabel(co.website)} ↗</a>}
             </div>
           )}
+          {/* The tab strip scrolls when it overflows, but the scrollbar under
+              the tabs read as a stray rule. Hidden here and in index.html;
+              wheel, trackpad and touch still scroll it. */}
           {data && (
-            <div style={{ display: 'flex', gap: 2, marginTop: 14, borderBottom: `1px solid ${C.cr2}`, overflowX: 'auto' }}>
-              {[['overview', 'Overview'], ['documents', `Documents (${(data.documents || []).length})`], ['tasks', `Tasks (${(data.openTasks || []).length})`], ['people', `People (${(data.people || []).length})`], ['deals', `Deals (${(data.opportunities || []).length})`]].map(([id, label]) => (
+            <div className="ovmg-no-scrollbar" style={{
+              display: 'flex', gap: 2, marginTop: 14, borderBottom: `1px solid ${C.cr2}`,
+              overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none',
+            }}>
+              {[['overview', 'Overview'], ['thread', 'Thread'], ['documents', `Documents (${(data.documents || []).length})`], ['tasks', `Tasks (${(data.openTasks || []).length})`], ['people', `People (${(data.people || []).length})`], ['deals', `Deals (${(data.opportunities || []).length})`]].map(([id, label]) => (
                 <button key={id} onClick={() => setCoTab(id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '9px 13px', fontFamily: SANS, fontSize: 13, whiteSpace: 'nowrap', color: coTab === id ? C.ink9 : C.ink3, fontWeight: coTab === id ? 600 : 400, borderBottom: coTab === id ? `2px solid ${C.acc}` : '2px solid transparent', marginBottom: -1 }}>{label}</button>
               ))}
             </div>
@@ -137,7 +175,30 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
 
           {data && (
             <div>
-              {coTab === 'overview' && <Section title="Notes & summary">
+              {coTab === 'thread' && (
+                <CompanyThread data={data} onOpenOpp={onOpenOpp} />
+              )}
+
+              {coTab === 'overview' && <>
+                {/* The bio: who they are, in the record's own words. Everything
+                    below is what has HAPPENED; this is what is true. */}
+                <Section title="Who they are">
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 8, marginBottom: 10 }}>
+                    <Fact label="Type"          value={co.type} />
+                    <Fact label="Status"        value={co.status} />
+                    <Fact label="Stage"         value={co.stage} />
+                    <Fact label="Health"        value={co.health} />
+                    <Fact label="Entity code"   value={co.entityCode} />
+                    <Fact label="Short code"    value={co.shortCode} />
+                    <Fact label="Follow-up"     value={co.followUpDate ? fmtR(co.followUpDate) : ''} />
+                    <Fact label="People · Deals" value={`${(data.people || []).length} · ${(data.opportunities || []).length}`} />
+                  </div>
+                  {co.subjectDescriptor
+                    ? <NoteBlock label="What they do" body={co.subjectDescriptor} />
+                    : <Empty>No descriptor yet — edit the company to say what they actually do.</Empty>}
+                </Section>
+
+                <Section title="Notes & summary">
                 {(co.notes?.summary || co.notes?.callsNotes || co.notes?.waitingOn) ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {co.notes.summary && <NoteBlock label="Summary" body={co.notes.summary} />}
@@ -160,9 +221,13 @@ export default function CompanySnapshot({ companyId, companyName, onClose, showT
                     ))}
                   </div>
                 )}
-              </Section>}
+              </Section>
+              </>}
 
               {coTab === 'documents' && <Section title="Documents" count={(data.documents || []).length}>
+                {/* Drive files carrying this company's name and no Documents
+                    row. A count, not a list — review it when you want to. */}
+                <DriveSuggestions kind="company" id={companyId} onLinked={reload} showToast={showToast} />
                 {(data.documents || []).length === 0 ? <Empty>No documents linked to this company.</Empty> : (
                   <div>
                     {folderGroups.map(({ folder, docs }) => (
@@ -285,4 +350,13 @@ function NoteBlock({ label, body }) {
 }
 function Empty({ children }) {
   return <div style={{ fontSize: 12, color: C.ink3, fontStyle: 'italic' }}>{children}</div>;
+}
+function Fact({ label, value }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+      <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, flexShrink: 0 }}>{label}</span>
+      <span style={{ flex: 1, height: 1, background: C.cr2 }} />
+      <span style={{ fontFamily: SANS, fontSize: 12.5, color: value ? C.ink9 : C.ink3 }}>{value || '—'}</span>
+    </div>
+  );
 }

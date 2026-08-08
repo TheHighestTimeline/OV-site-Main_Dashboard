@@ -249,6 +249,16 @@ export const suggestForOpportunity = (opportunityId) =>
 /** Deals that unlinked tasks probably belong to. Proposals only — nothing is written. */
 export const suggestTaskLinks = () => req('crm-suggest?unlinkedTasks=1');
 
+/**
+ * Drive files that probably belong to this record but have no Documents row.
+ * kind: 'opportunity' | 'contact' | 'company' | 'task'. Read-only.
+ */
+export const suggestDriveLinks = (kind, id) =>
+  req(`drive-suggest?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`);
+/** Accept one Drive suggestion: files the document against the record. */
+export const linkDriveFile = (kind, id, file) =>
+  req('drive-link', { method: 'POST', body: JSON.stringify({ kind, id, file }) });
+
 // Bug reports (§2.4)
 export const sendBugReport     = data       =>
   req('bug-report', { method: 'POST', body: JSON.stringify(data) });
