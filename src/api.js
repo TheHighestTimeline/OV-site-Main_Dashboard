@@ -131,6 +131,11 @@ export const previewCompanyMerge = (ids) =>
 export const mergeCompanies = (keepId, dropIds, fields = undefined) =>
   req('companies-merge', { method: 'POST', body: JSON.stringify({ keepId, dropIds: [].concat(dropIds), fields }) });
 
+// Which Supabase project the FUNCTIONS are bound to, and which tables they can
+// actually see. The one question you cannot answer from the Supabase dashboard,
+// because from there you are always looking at whichever project you opened.
+export const getSupabaseHealth = () => req('supabase-health');
+
 // Granola + Gmail auto-logging. Writes Activity rows and Last Contacted only —
 // it never creates a task or moves a stage. See netlify/functions/crm-autolog.js.
 export const runAutoLog = (only = null) =>

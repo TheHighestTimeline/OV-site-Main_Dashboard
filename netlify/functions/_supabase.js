@@ -58,15 +58,28 @@ export function getSupabase() {
 
 // ── Missing-table errors, translated into instructions ──────────────────────
 //
-// PostgREST answers a query against a table that does not exist with
+// PostgREST answers a query against a table it cannot see with
 //   "Could not find the table 'public.call_reviews' in the schema cache"
-// which surfaces in the UI as a toast nobody can act on. The real meaning is
-// always the same: a migration in this repo was never run against Supabase.
+// which surfaces in the UI as a toast nobody can act on.
 //
-// This maps the table name back to the file that creates it, so the toast says
-// what to do. Worth having because the schema is spread across a dozen .sql
-// files at the repo root plus migrations/, and there is no record of which have
-// been applied — the only way anyone finds out is by hitting this error.
+// This maps the table name back to the file that creates it. Worth having
+// because the schema is spread across a dozen .sql files at the repo root plus
+// migrations/, and there is no record of which have been applied — the only way
+// anyone finds out is by hitting this error.
+//
+// BUT THE MESSAGE MUST NOT CLAIM THE MIGRATION IS UNRUN. It said exactly that
+// for a while, and it cost real time: the wording is PostgREST's SCHEMA CACHE
+// error, and that one string covers three different situations —
+//
+//   1. the migration was never run
+//   2. it was run, but PostgREST's cached schema is stale
+//   3. it was run against a DIFFERENT Supabase project than SUPABASE_URL points at
+//
+// Only the first is fixed by running the file. Told "run the migration", someone
+// hitting 2 or 3 runs it, sees "Success", reloads, gets the identical error, and
+// has no way to tell they are in a different case — because from the dashboard,
+// the table plainly exists. Name all three and point at supabase-health, which
+// reports the project ref the functions are actually bound to.
 const TABLE_SOURCE = {
   call_reviews:         'supabase-call-reviews-schema.sql',
   usage_events:         'supabase-usage-events-schema.sql',
@@ -96,14 +109,22 @@ export function explainSupabaseError(e) {
       ? 'migrations/0002_coo_threads_schema.sql'
       : TABLE_SOURCE[table];
 
-    return file
-      ? `The "${table}" table does not exist in Supabase yet. Run ${file} in the Supabase SQL editor, then reload. ` +
-        'It is additive and safe to re-run.'
-      : `The "${table}" table does not exist in Supabase yet. Find the migration that creates it and run it in the Supabase SQL editor.`;
+    const where = file
+      ? `Run ${file} in the Supabase SQL editor (it is additive and safe to re-run).`
+      : 'Find the migration that creates it and run it in the Supabase SQL editor.';
+
+    return `Supabase cannot see the "${table}" table. Three things cause this: ` +
+      `(1) the migration was never run — ${where} ` +
+      "(2) it was run but PostgREST's schema cache is stale — run: notify pgrst, 'reload schema'; " +
+      '(3) it was run against a different Supabase project than this app reads. ' +
+      'Settings → Supabase health shows which project ref the app is bound to — ' +
+      'compare it with your Supabase dashboard URL.';
   }
 
   if (/schema cache/i.test(raw)) {
-    return `${raw} — this usually means a migration has not been run against Supabase yet.`;
+    return `${raw} — the migration may be unrun, the schema cache may be stale ` +
+      "(notify pgrst, 'reload schema';), or the app may be pointed at a different Supabase project. " +
+      'Check Settings → Supabase health.';
   }
 
   return raw;

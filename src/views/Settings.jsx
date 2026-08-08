@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { C, SERIF, SANS, MONO } from '../constants.js';
 import { Eyebrow, Btn, Inp, FR, Toggle, Spinner } from '../components/UI.jsx';
 import AccountSwitcher from '../components/AccountSwitcher.jsx';
-import { runAutoLog, getAppState, setAppState } from '../api.js';
+import { runAutoLog, getAppState, setAppState, getSupabaseHealth } from '../api.js';
 import { useUser } from '@clerk/clerk-react';
 
 // ── Section card wrapper ──────────────────────────────────────────────────────
@@ -42,6 +42,87 @@ function NotifRow({ label, desc, checked, onChange }) {
       </div>
       <Toggle checked={checked} onChange={onChange} />
     </div>
+  );
+}
+
+// ── Supabase health ───────────────────────────────────────────────────────────
+//
+// Answers the one question the Supabase dashboard cannot: which project are the
+// FUNCTIONS bound to? From the dashboard you are always looking at whichever
+// project you happened to open, so "the table is right there" and "the app says
+// it is missing" can both be true at once, and nothing on screen reveals it.
+//
+// The project ref shown here is the one that matters. Compare it against the ref
+// in your dashboard URL (supabase.com/dashboard/project/<ref>).
+function SupabaseHealthPanel({ showToast }) {
+  const [busy, setBusy]     = useState(false);
+  const [report, setReport] = useState(null);
+
+  const check = async () => {
+    setBusy(true);
+    try {
+      const r = await getSupabaseHealth();
+      setReport(r);
+      if (!r.missing?.length) showToast?.('All Supabase tables visible ✓');
+    } catch (e) {
+      showToast?.('Health check failed: ' + e.message);
+    }
+    setBusy(false);
+  };
+
+  const mono = { fontFamily: MONO, fontSize: 11 };
+
+  return (
+    <Section title="Supabase health">
+      <p style={{ fontSize: 13, color: C.ink5, margin: '0 0 12px', lineHeight: 1.55 }}>
+        Shows which Supabase project this app's functions are actually reading, and which tables
+        they can see. If a table looks present in your dashboard but the app insists it is missing,
+        the two are almost always <b>different projects</b> — this is how you find out.
+      </p>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Btn onClick={check} disabled={busy}>{busy ? 'Checking…' : 'Check now'}</Btn>
+        {busy && <Spinner size={16} />}
+      </div>
+
+      {report && (
+        <div style={{ marginTop: 14, padding: '12px 14px', background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 9 }}>
+          <div style={{ ...mono, color: C.ink3, letterSpacing: '.1em', textTransform: 'uppercase', fontSize: 9, marginBottom: 6 }}>
+            App is bound to project
+          </div>
+          <div style={{ ...mono, fontSize: 15, color: C.ink9, fontWeight: 700, marginBottom: 4 }}>
+            {report.projectRef || '— not configured —'}
+          </div>
+          <div style={{ ...mono, color: C.ink3, fontSize: 10, marginBottom: 12 }}>
+            Compare with supabase.com/dashboard/project/<b>&lt;ref&gt;</b>
+          </div>
+
+          {!report.env?.SUPABASE_URL_set && (
+            <div style={{ ...mono, color: C.red, marginBottom: 8 }}>SUPABASE_URL is not set in Netlify.</div>
+          )}
+          {!report.env?.SUPABASE_SERVICE_ROLE_KEY_set && (
+            <div style={{ ...mono, color: C.red, marginBottom: 8 }}>SUPABASE_SERVICE_ROLE_KEY is not set in Netlify.</div>
+          )}
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {(report.tables || []).map(t => (
+              <span key={t.table} title={t.visible ? 'Visible' : `${t.error || 'Not visible'} — ${t.file || ''}`}
+                style={{
+                  ...mono, fontSize: 10, padding: '2px 8px', borderRadius: 999,
+                  background: t.visible ? C.grnS : C.redS,
+                  color: t.visible ? C.grn : C.red,
+                  border: `1px solid ${t.visible ? C.grn : C.red}30`,
+                }}>
+                {t.visible ? '✓' : '✕'} {t.table}
+              </span>
+            ))}
+          </div>
+
+          <div style={{ ...mono, marginTop: 10, color: report.missing?.length ? C.yel : C.grn, lineHeight: 1.5 }}>
+            {report.summary}
+          </div>
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -267,6 +348,9 @@ export default function Settings({ user, showToast, onLogout, openOv, closeOv, s
             />
           </div>
         </Section>
+
+        {/* ── Supabase health ────────────────────────────────────────────── */}
+        <SupabaseHealthPanel showToast={showToast} />
 
         {/* ── Auto-logging ───────────────────────────────────────────────── */}
         <AutoLogPanel showToast={showToast} />
