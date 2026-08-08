@@ -27,6 +27,12 @@
       /* Clerk modal z-index fix */
       .cl-rootBox { z-index: 9999; }
 
+      /* Horizontal tab strips scroll when they overflow, but the scrollbar
+         reads as a stray line under the tabs. Hide the track; the strip still
+         scrolls by wheel, trackpad and touch. Firefox/IE use the inline
+         scrollbarWidth/msOverflowStyle props on the same element. */
+      .ovmg-no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
       /* ── Dark mode ──────────────────────────────────────────────────────────
          A real dark theme: the JS palette (src/constants.js) swaps its tokens to
          dark values and the React root re-renders. This rule only sets the

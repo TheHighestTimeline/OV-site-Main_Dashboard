@@ -246,6 +246,8 @@ export const suggestForContact = (contactId) =>
   req(`crm-suggest?contactId=${encodeURIComponent(contactId)}`);
 export const suggestForOpportunity = (opportunityId) =>
   req(`crm-suggest?opportunityId=${encodeURIComponent(opportunityId)}`);
+/** Deals that unlinked tasks probably belong to. Proposals only — nothing is written. */
+export const suggestTaskLinks = () => req('crm-suggest?unlinkedTasks=1');
 
 // Bug reports (§2.4)
 export const sendBugReport     = data       =>

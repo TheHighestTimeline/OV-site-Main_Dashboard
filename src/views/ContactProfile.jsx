@@ -256,6 +256,7 @@ function DealsTab({ c, showToast, isAdmin }) {
 
       <Suggestions
         title="Deals this person is probably on"
+        collapsed
         scopeKey={`contact:${c.id}`}
         fetcher={fetchSuggestions}
         onLink={async (item) => {

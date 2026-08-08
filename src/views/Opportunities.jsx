@@ -6,7 +6,8 @@ import HierarchyEditor from './opportunities/HierarchyEditor.jsx';
 import LinksEditor from './opportunities/LinksEditor.jsx';
 import TaskRowEditor from './opportunities/TaskRowEditor.jsx';
 import TaskKanban from './opportunities/TaskKanban.jsx';
-import Suggestions from '../components/Suggestions.jsx';
+import Suggestions, { rememberRejected, forgetRejected } from '../components/Suggestions.jsx';
+import ThreadTab from './opportunities/ThreadTab.jsx';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
          getAirtableSchema, airtableRecordUrl, getAppState, setAppState,
@@ -101,6 +102,8 @@ function byPriorityThenName(a, b) {
 const levelOf = (o) => o?.level || (o?.parentId ? 'Story' : 'Epic');
 
 const UNLINKED_ID = '__unlinked__';
+
+const TAB_LABEL = { home: 'Home', tasks: 'Tasks', thread: 'Thread' };
 
 const CARD_SECTIONS_KEY = 'ovmg.card.sections';
 const SECTIONS = [
@@ -403,6 +406,9 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
   const addContact = (id) => {
     if (!id || (opp.contactIds || []).includes(id)) return;
     const ct = (contactsList || []).find(c => c.id === id);
+    // Linking by hand overturns any earlier "not this one", so the suggester is
+    // allowed to have an opinion about them again.
+    forgetRejected(`opp:${opp.id}`, id);
     save({
       contactIds: [...(opp.contactIds || []), id],
       contacts:   [...(opp.contacts   || []), { id, name: ct?.name || '' }],
@@ -490,6 +496,10 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
   };
 
   const removeContact = (id) => {
+    // Taking someone off a deal is a verdict on the suggester too. Without this
+    // the same person is proposed again on the next render, which reads as the
+    // app arguing with a decision you just made.
+    rememberRejected(`opp:${opp.id}`, id);
     save({
       contactIds: (opp.contactIds || []).filter(x => x !== id),
       contacts:   (opp.contacts   || []).filter(x => x.id !== id),
@@ -501,8 +511,21 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
   // The split is by what you are doing, not by field type — you come here either
   // to change the deal or to work the relationships around it, and in a 500px
   // column the second half was always below the fold.
-  const twoPane = { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.05fr) minmax(0, 1fr)', gap: isMobile ? 18 : 30, alignItems: 'start' };
-  const fieldGrid = { display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 12 };
+  // Two panes need width. In the shrunk card they become one column, because a
+  // 500px modal split in half is two unreadable columns rather than a layout.
+  const twoPane = {
+    display: 'grid',
+    gridTemplateColumns: (isMobile || !expanded) ? '1fr' : 'minmax(0, 1.05fr) minmax(0, 1fr)',
+    gap: (isMobile || !expanded) ? 16 : 30,
+    alignItems: 'start',
+  };
+  // Three selects across a 500px modal is what produced "In W…", "Not…", "Dea…"
+  // in the shrunk card. Two when narrow, three only when there is room.
+  const fieldGrid = {
+    display: 'grid',
+    gridTemplateColumns: (isMobile || !expanded) ? 'repeat(2, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))',
+    gap: 10, marginBottom: 12,
+  };
   const paneTitle = { fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.ink3, borderBottom: `1px solid ${C.cr2}`, paddingBottom: 6, marginBottom: 12 };
 
   const footer = (
@@ -525,7 +548,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       title={opp.name}
       onClose={onClose}
       sub={`${lane}${opp.entity ? ` · ${opp.entity}` : ''} · ${levelOf(opp)}`}
-      size={expanded ? 'full' : tab === 'tasks' ? 'wide' : 'default'}
+      size={expanded || tab === 'tasks' || tab === 'thread' ? 'full' : 'default'}
       footer={footer}
       headerRight={
         <button
@@ -578,7 +601,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       {/* Home | Tasks. The card was one long scroll with the task list buried at
           the bottom; tasks are their own job and deserve their own surface. */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 12, borderBottom: `1px solid ${C.cr2}` }}>
-        {['home', 'tasks'].map(t => (
+        {['home', 'tasks', 'thread'].map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '7px 14px', border: 'none', background: 'transparent',
             borderBottom: `2px solid ${tab === t ? C.acc : 'transparent'}`,
@@ -586,7 +609,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
             fontFamily: SANS, fontSize: 13, fontWeight: tab === t ? 600 : 400,
             cursor: 'pointer', marginBottom: -1, textTransform: 'capitalize',
           }}>
-            {t}{t === 'tasks' && cardTasks.length ? ` · ${cardTasks.length}` : ''}
+            {TAB_LABEL[t] || t}{t === 'tasks' && cardTasks.length > 0 ? ` · ${cardTasks.length}` : ''}
           </button>
         ))}
       </div>
@@ -615,7 +638,14 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
         </div>
       )}
 
-      {tab === 'tasks' ? (
+      {tab === 'thread' ? (
+        <ThreadTab
+          opp={opp}
+          stories={childStories}
+          contacts={contactsList || []}
+          onOpenThreads={onOpenThread ? () => onOpenThread(opp) : null}
+        />
+      ) : tab === 'tasks' ? (
         <TaskKanban
           opp={opp}
           stories={childStories}
@@ -858,6 +888,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
 
       <Suggestions
         title="People probably on this deal"
+        collapsed
         scopeKey={`opp:${opp.id}`}
         fetcher={fetchPeopleSuggestions}
         onLink={async (item) => {

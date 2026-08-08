@@ -297,7 +297,11 @@ export default function Companies({ showToast, setView }) {
           actionLabel={companies.length ? null : '+ New company'}
           onAction={companies.length ? null : () => setFormFor({})} />
       ) : (
-        <div style={{ background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 10, overflow: 'hidden', overflowX: 'auto' }}>
+        <div style={{
+          background: C.bg2, border: `1px solid ${C.cr2}`, borderRadius: 10,
+          overflow: 'hidden', overflowX: 'auto',
+          scrollbarWidth: 'none', msOverflowStyle: 'none',
+        }} className="ovmg-no-scrollbar">
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 900 }}>
             <thead>
               <tr>

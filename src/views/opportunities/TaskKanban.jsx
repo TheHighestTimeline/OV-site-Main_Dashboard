@@ -15,10 +15,11 @@
 // outstanding on this deal" is a question about the deal, not about one thread.
 // The story filter narrows it back down.
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { C, SANS, MONO } from '../../constants.js';
-import { createTask, updateTask } from '../../api.js';
+import { createTask, updateTask, suggestTaskLinks } from '../../api.js';
 import TaskPage from './TaskPage.jsx';
+import Suggestions from '../../components/Suggestions.jsx';
 import { Modal, useConfirm } from '../../components/UI.jsx';
 
 export const TASK_LANES = [
@@ -162,6 +163,24 @@ export default function TaskKanban({
     }
   }
 
+  // Which deal each homeless task probably belongs to. Scoped to the visible
+  // ids so a card's Tasks tab does not offer to file work from other deals.
+  const visibleIds = useMemo(() => new Set(scoped.map(t => t.id)), [scoped]);
+  const fetchTaskSuggestions = useCallback(
+    () => suggestTaskLinks()
+      .then(r => (r?.items || []).filter(i => visibleIds.has(i.id)))
+      .catch(() => []),
+    [visibleIds],
+  );
+
+  const linkSuggested = useCallback(
+    async (item) => {
+      await updateTask(item.id, { opportunityIds: [item.targetId] });
+      onChanged?.();
+    },
+    [onChanged],
+  );
+
   const openTask = openId ? tasks.find(t => t.id === openId) : null;
 
   return (
@@ -185,6 +204,16 @@ export default function TaskKanban({
             confirm={confirm}
           />
         </Modal>
+      )}
+
+      {unassignedCount > 0 && (
+        <Suggestions
+          collapsed
+          title="Tasks that probably belong to a deal"
+          scopeKey="tasks:unlinked"
+          fetcher={fetchTaskSuggestions}
+          onLink={linkSuggested}
+        />
       )}
 
       {onBulkLink && unassignedCount > 0 && (
@@ -254,7 +283,7 @@ export default function TaskKanban({
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${TASK_LANES.length}, minmax(180px, 1fr))`,
+        gridTemplateColumns: `repeat(${TASK_LANES.length}, minmax(${compact ? 140 : 170}px, 1fr))`,
         gap: 8, overflowX: 'auto', paddingBottom: 4,
       }}>
         {TASK_LANES.map(lane => {
