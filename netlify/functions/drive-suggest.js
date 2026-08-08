@@ -30,6 +30,25 @@ const TASKS_TBL     = () => process.env.AIRTABLE_TABLE_TASKS         || TB.TASKS
 
 function arr(v) { return Array.isArray(v) ? v : v ? [v] : []; }
 
+// The expensive half of this job — a paged Drive listing plus a full read of
+// Documents — is IDENTICAL for every record. Opening five cards in a row would
+// otherwise mean five Drive scans and five table reads for the same answer.
+//
+// Netlify reuses a warm container across invocations, so a short-lived cache
+// here turns those five into one. Deliberately short: a document filed a minute
+// ago should stop being suggested, and this is a convenience, not a source of
+// truth.
+const SCAN_TTL_MS = 3 * 60 * 1000;
+const scanCache = new Map();   // key -> { at, value }
+
+async function cached(key, fn) {
+  const hit = scanCache.get(key);
+  if (hit && Date.now() - hit.at < SCAN_TTL_MS) return hit.value;
+  const value = await fn();
+  scanCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
 // Words that appear in half the Drive and mean nothing on their own. Matching
 // on one of these is how a "Meeting Notes" doc gets filed under whichever deal
 // happens to have "notes" in its name.
@@ -85,7 +104,8 @@ export const handler = async (event) => {
 
     let files;
     try {
-      files = await listRecentFiles({ userId: user?.id, limit: 250 });
+      files = await cached(`drive:${user?.id || 'anon'}`,
+        () => listRecentFiles({ userId: user?.id, limit: 250 }));
     } catch (e) {
       // No Google connection, revoked token, missing scope — all the same to
       // the caller: there is nothing to suggest right now, and it is not an error.
@@ -95,7 +115,8 @@ export const handler = async (event) => {
 
     // Already filed. Matching on the Drive file id rather than the raw URL
     // because the same document is reachable through several link shapes.
-    const docs = await listRecordsLenient(DOCS_TBL(), { fields: ['Drive Link'] }).catch(() => []);
+    const docs = await cached('docs',
+      () => listRecordsLenient(DOCS_TBL(), { fields: ['Drive Link'] }).catch(() => []));
     const known = new Set();
     for (const d of docs) {
       const fid = fileIdFromLink(d.fields?.['Drive Link']);
@@ -206,7 +227,10 @@ async function needlesFor(kind, id) {
 /** Names for a set of linked record ids. Missing rows are simply skipped. */
 async function hydrate(table, ids, nameField) {
   if (!ids.length) return [];
-  const rows = await listRecordsLenient(table, { fields: [nameField] }).catch(() => []);
+  // Cached for the same reason as the Drive listing: this is one full table
+  // read that every record in the base would otherwise repeat.
+  const rows = await cached(`names:${table}:${nameField}`,
+    () => listRecordsLenient(table, { fields: [nameField] }).catch(() => []));
   const byId = Object.fromEntries(rows.map(r => [r.id, r.fields?.[nameField] || '']));
   return ids.map(i => byId[i]).filter(Boolean);
 }

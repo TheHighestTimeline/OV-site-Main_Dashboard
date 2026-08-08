@@ -1133,3 +1133,125 @@ create it and back here to link it is exactly why deals sit with no company on
 them and every Activity about them routes nowhere. Because it goes through
 `companies-create`, typing a name that already exists **links that record** rather
 than making a near-duplicate, and the toast says which happened.
+
+## 28. Cards that fit, and Thread as a tab (2026-08-08)
+
+### The shrunk card was unreadable
+
+Two panes and a four-column field grid inside a 500px modal produced selects
+reading `In W…`, `Not…`, `Dea…`. Both layouts now collapse — one pane, two
+columns — until the card is expanded. The Tasks and Thread tabs open full-width
+unconditionally, because a six-lane board cannot be read through a keyhole, and
+the task lanes narrow when compact so the board fits without a sideways scroll.
+
+The task-count bubble only renders when there are tasks. A count of zero is not
+information, it is a badge asking to be checked.
+
+### Thread is a tab on the card
+
+Previously the deal timeline lived only in the Threads tab, one navigation away
+from the record it describes. It is now a tab on the card, next to Tasks, which
+is where the question "what has happened on this" is actually asked.
+
+**What it reads, and why that matters.** The first cut read only `coo_events`,
+which needs `migrations/0002_coo_threads_schema.sql` — known-unrun (§15). On a
+real deal that produced paperwork dates and nothing else: no conversation, which
+is the entire point. But `crm-autolog` (§26) has been filing every Gmail thread
+and Granola transcript into **Airtable Activities** against the deal's contacts
+and companies the whole time. The tab reads those, so the history is real today
+rather than after a migration. `coo_events` still layers in when the tables
+exist; when every read fails, a note says the message-level half is missing
+rather than leaving an empty timeline implying nothing happened.
+
+`activities-list` gained `?contactIds=&companyIds=` (comma-separated). A deal's
+history is the union of its people's conversations, and asking one contact at a
+time would be N round trips against a rate-limited base to re-filter one list.
+
+**Direction is tracked.** "Waiting on a response" is a claim about the last time
+*they* spoke; an outbound email is not an answer. That drives a standing line
+above the timeline: conversation opened on this date, and where it sits now —
+waiting on them, ball back here, or last movement was paperwork. The timeline is
+the evidence for it.
+
+## 29. Companies: shrunk, expanded, and a weekly history (2026-08-08)
+
+The company snapshot got what the deal cards got. It opens shrunk and expands to
+full screen, and the choice is remembered — which size you want is a habit, not
+a per-company decision, and re-expanding on every open was the whole annoyance.
+
+**A bio ahead of the history.** The Overview leads with "Who they are": type,
+status, stage, health, codes, counts, and the subject descriptor. Everything
+else on the record is what has *happened*; this is what is *true*.
+
+**The Thread tab, bucketed by week.** Every logged call, email and meeting,
+every signed document, every dated commitment lands in the week it happened.
+Nothing is typed twice — the tab reads what the base already recorded, which is
+the only way a weekly history keeps itself current. The header answers the one
+question you open it for: how long since we last heard from them, where "heard
+from" means an activity, not a task due date on our own calendar.
+
+`company-detail` now sorts activities by date *before* slicing to 80, and
+returns `Subject Descriptor`. Slicing in Airtable's arbitrary order dropped whole
+weeks out of the middle of the story.
+
+**The tab strip no longer draws a scrollbar.** `overflow-x: auto` on a horizontal
+tab row put a stray rule under the tabs. Hidden via `.ovmg-no-scrollbar`
+(`index.html`) plus the inline Firefox/IE properties; wheel, trackpad and touch
+still scroll it.
+
+## 30. Suggestions as a count, not a list (2026-08-08)
+
+Three suggesters now share one interaction: a button reading **"N suggested
+links — review"**, opening a screen with select-all, bulk **Link N**, and a
+gated **Skip the rest**. Learning three patterns is two too many.
+
+- **People on a deal** — same company, or their company's name in the deal name.
+- **Tasks with no home** — `crm-suggest?unlinkedTasks=1`. Ranks a shared project
+  above a company named in the task above words shared with the deal's name, and
+  holds that last case to two distinctive tokens or one long one. "Send deck"
+  filed under the first deal containing "deck" is exactly the quiet wrong link
+  the confidence tiers exist to prevent.
+- **Drive documents** — `drive-suggest?kind=…&id=…`, on deals, contacts,
+  companies and tasks.
+
+### Rejections are remembered, in both directions
+
+Dismissing a suggestion writes it to `localStorage` under
+`ovmg.suggestions.dismissed`, keyed per record. **Unlinking a person from a deal
+does the same** — that is a verdict on the suggester, and without it the same
+person is proposed again on the next render, which reads as the app arguing with
+a decision just made. Linking one by hand clears the rejection.
+
+**"Skip the rest" is gated.** It discards every remaining suggestion
+permanently and an accidental click would be silent, so it asks once.
+
+### The Drive scanner
+
+`drive-suggest` lists recently modified files (folders excluded — you link a
+document, not a directory), skips anything already carrying a Documents row, and
+matches filenames against the record plus the people and companies around it. A
+signed NCNDA is far more likely to be named after the counterparty than the deal.
+
+- **Matching on the Drive file id**, not the URL: one document is reachable
+  through several link shapes, and matching on the string would re-suggest files
+  already filed.
+- **Two distinctive words, or one at least seven characters.** The noise list
+  covers what appears in half the Drive — `final`, `draft`, `signed`,
+  `agreement`, `notes`, `deck` — because matching on one of those is how a
+  meeting-notes doc gets filed under whichever deal has "notes" in its name.
+- **No Google connection returns an empty list with a note**, not an error. An
+  optional integration should not make a card look broken.
+- **Cached for three minutes** at module scope. The Drive listing and the
+  Documents read are identical for every record; opening five cards would
+  otherwise mean five scans for one answer. Short on purpose — a document filed
+  a minute ago should stop being suggested.
+
+Accepting one calls `drive-link`, which creates a Documents row pointed at the
+record — or, for a task, **appends** to its own `Task Links` JSON, because losing
+a link somebody added by hand would be the worst outcome of a convenience.
+
+`guessType` only names the unambiguous cases, and only from choices the Type
+select already has. Airtable reads an unknown option as "create this option" and
+rejects the whole write; and a wrong Type is worse than none, since Type is what
+the NCNDA detector and the compliance gate read. A plain NDA falls through to
+`Other` on purpose — it is not an NCNDA, and there is no NDA choice.
