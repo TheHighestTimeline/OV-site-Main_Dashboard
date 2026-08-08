@@ -2,12 +2,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { C, SERIF, SANS, MONO, RELATES, stBg, stFg, fmtR } from '../constants.js';
 import { Tag, Btn, Inp, Sel, FR, VoiceMic, Spinner } from '../components/UI.jsx';
 import { cacheClear } from '../lib/cache.js';
+import Suggestions from '../components/Suggestions.jsx';
 import {
   getNotes, createNote, updateNote, deleteNote, updateContact, parseVoice,
   getDocumentsForContact, createDocument, updateDocument, getTasks, createTask, updateTask,
   getFoldersForContact, getFoldersForCompany, createFolder, getActivitiesForContact,
   getOpportunities, updateOpportunity, createOpportunity,
-  sendNcnda, detectNcnda, airtableRecordUrl, getCompanies,
+  sendNcnda, detectNcnda, airtableRecordUrl, getCompanies, suggestForContact,
 } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import CompanySnapshot from './CompanySnapshot.jsx';
@@ -236,6 +237,14 @@ function DealsTab({ c, showToast, isAdmin }) {
   const unlink = async (o) => { if (!window.confirm('Unlink this deal from the contact?')) return; try { await updateOpportunity(o.id, { contactIds: (o.contactIds || []).filter(id => id !== c.id) }); showToast('Unlinked'); load(); } catch (e) { showToast('Failed: ' + e.message); } };
   const newDeal = async () => { const name = window.prompt('New deal name:'); if (!name) return; setBusy(true); try { await createOpportunity({ name: name.trim(), contactIds: [c.id], entity: (c.relatesTo || [])[0] || undefined }); showToast('Deal created ✓'); load(); } catch (e) { showToast('Failed: ' + e.message); } setBusy(false); };
 
+  // Deals this person is probably on but is not linked to. The case that
+  // prompted it: a deal that already names them, written from the opportunity
+  // side, which this tab was not reading back.
+  const fetchSuggestions = useCallback(
+    () => suggestForContact(c.id).then(r => r.deals || []),
+    [c.id],
+  );
+
   const selStyle = { border: `1px solid ${C.cr3}`, background: C.bg2, borderRadius: 7, padding: '4px 8px', fontFamily: SANS, fontSize: 12, color: C.ink8, outline: 'none', cursor: 'pointer' };
 
   return (
@@ -244,6 +253,20 @@ function DealsTab({ c, showToast, isAdmin }) {
         <Btn v="gho" onClick={() => setShowLink(v => !v)}>🔗 {showLink ? 'Cancel' : 'Link existing'}</Btn>
         <Btn onClick={newDeal} disabled={busy}>+ New deal</Btn>
       </div>
+
+      <Suggestions
+        title="Deals this person is probably on"
+        scopeKey={`contact:${c.id}`}
+        fetcher={fetchSuggestions}
+        onLink={async (item) => {
+          const target = (pool || []).find(o => o.id === item.id);
+          await updateOpportunity(item.id, {
+            contactIds: [...((target?.contactIds) || []), c.id],
+          });
+          showToast('Deal linked ✓');
+          load();
+        }}
+      />
 
       {showLink && (
         <Card style={{ background: C.bg2 }}>

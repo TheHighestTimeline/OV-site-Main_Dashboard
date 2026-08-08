@@ -6,10 +6,11 @@ import HierarchyEditor from './opportunities/HierarchyEditor.jsx';
 import LinksEditor from './opportunities/LinksEditor.jsx';
 import TaskRowEditor from './opportunities/TaskRowEditor.jsx';
 import TaskKanban from './opportunities/TaskKanban.jsx';
+import Suggestions from '../components/Suggestions.jsx';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
          getAirtableSchema, airtableRecordUrl, getAppState, setAppState,
-         createContact, createCompany } from '../api.js';
+         createContact, createCompany, suggestForOpportunity } from '../api.js';
 import { dealCategoryMatchesSlug, SLUG_TO_DEAL_CATEGORY, COMPANIES, COMPANY_META } from '../constants/roles.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 
@@ -449,6 +450,13 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
     return out;
   }, [opp, childStories]);
 
+  // Who is probably on this deal but is not linked: same company, or their
+  // company's name appears in the deal name.
+  const fetchPeopleSuggestions = useCallback(
+    () => suggestForOpportunity(opp.id).then(r => r.people || []),
+    [opp.id],
+  );
+
   const [addingContact, setAddingContact] = useState(false);
   const [ncBusy, setNcBusy] = useState(false);
   const [nc, setNc] = useState({ name: '', email: '', company: '', role: '' });
@@ -847,6 +855,19 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
           </div>
         )}
       </div>
+
+      <Suggestions
+        title="People probably on this deal"
+        scopeKey={`opp:${opp.id}`}
+        fetcher={fetchPeopleSuggestions}
+        onLink={async (item) => {
+          await save({
+            contactIds: [...(opp.contactIds || []), item.id],
+            contacts:   [...(opp.contacts   || []), { id: item.id, name: item.name }],
+          });
+          showToast?.(`${item.name} linked ✓`);
+        }}
+      />
 
       {/* ── Hierarchy, links, tasks ── */}
       {visible.hierarchy !== false && (

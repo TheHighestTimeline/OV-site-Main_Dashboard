@@ -240,6 +240,13 @@ export const sendNcnda         = data       =>
 export const detectNcnda = (contactId, entity) =>
   req(`ncnda-detect?contactId=${encodeURIComponent(contactId)}&entity=${encodeURIComponent(entity || '')}`);
 
+// What is probably connected but is not linked yet. Read-only: it proposes with
+// a reason and a confidence, and the caller does any write.
+export const suggestForContact = (contactId) =>
+  req(`crm-suggest?contactId=${encodeURIComponent(contactId)}`);
+export const suggestForOpportunity = (opportunityId) =>
+  req(`crm-suggest?opportunityId=${encodeURIComponent(opportunityId)}`);
+
 // Bug reports (§2.4)
 export const sendBugReport     = data       =>
   req('bug-report', { method: 'POST', body: JSON.stringify(data) });
