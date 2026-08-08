@@ -612,6 +612,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
           opp={opp}
           stories={childStories}
           tasks={cardTasks}
+          contacts={contactsList || []}
           onChanged={onTasksChanged}
           showToast={showToast}
         />
@@ -1756,6 +1757,7 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               tasks={allTasksForBoard}
               onChanged={() => { load(); getTasks().then(r => setTasksList(r || [])).catch(() => {}); }}
               showToast={showToast}
+              contacts={contactsList || []}
               onBulkLink
               linkTargets={opps}
             />

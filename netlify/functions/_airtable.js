@@ -438,6 +438,13 @@ export const TASKS_MAP = {
   taskType:        'Task Type',       // singleSelect Task/Reminder - distinguishes a to-do from a reminder
   owner:           'Assigned To',     // linked -> Contacts (recordIds)
   relatedProjects: 'Related Project', // linked -> Projects  (recordIds)
+  // What has HAPPENED on the task, as opposed to `notes`/Description which is
+  // what the task IS. Append-only, newest first, written by the task page.
+  workLog:         'Work Log',
+  // JSON array of {label, url}: Airtable has no repeating-group field.
+  links:           'Task Links',
+  sourceThread:    'Source Thread',
+  context:         'Context',
 };
 
 // Live base: "Opportunities"

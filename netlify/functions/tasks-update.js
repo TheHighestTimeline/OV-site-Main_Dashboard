@@ -1,6 +1,6 @@
 import { airtableGet, airtableList, airtableUpdate, toAirtableFields, TASKS_MAP } from './_airtable.js';
 import { ok, err, CORS } from './_http.js';
-import { requireAuth } from './_auth.js';
+import { requireAuth, getUser } from './_auth.js';
 
 const TABLE = () => process.env.AIRTABLE_TABLE_TASKS || 'Master Action Board';
 
@@ -12,12 +12,23 @@ export const handler = async (event) => {
   try {
     const body = JSON.parse(event.body || '{}');
     const { id, task, status, priority, owner, dueDate, dealCategory, taskType, entity, type,
-            contactIds, relatedProjectIds, opportunityIds, clientIds, updateNote } = body;
+            contactIds, relatedProjectIds, opportunityIds, clientIds, updateNote,
+            links, sourceThread, appendLog } = body;
     if (!id) return err(400, 'id is required');
 
     const update = {};
     if (task         !== undefined) update.task         = task;
     if (status       !== undefined) update.status       = status;
+    if (sourceThread !== undefined) update.sourceThread = sourceThread || '';
+    // Stored as JSON text. Serialised here so a malformed array can never reach
+    // the record and break every read of it.
+    if (links !== undefined) {
+      update.links = Array.isArray(links)
+        ? JSON.stringify(links
+            .filter(l => l && String(l.url || '').trim())
+            .map(l => ({ label: String(l.label || '').trim().slice(0, 120), url: String(l.url).trim() })))
+        : '';
+    }
     if (priority     !== undefined) update.priority     = priority;
     if (dueDate      !== undefined) update.dueDate      = dueDate || null;
     if (taskType     !== undefined) update.taskType     = taskType || null;
@@ -66,6 +77,21 @@ export const handler = async (event) => {
     if (clientIds         !== undefined) fields['Client']          = Array.isArray(clientIds)         ? clientIds         : [];
 
     if (Object.keys(fields).length === 0) return ok({ id, updated: false });
+
+    // Work log is append-only, newest first. Read-modify-write rather than a
+    // plain set, because two people logging on the same task minutes apart must
+    // not silently overwrite each other. Airtable has no append primitive.
+    if (String(appendLog || '').trim()) {
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      const who   = (await getUser(event).catch(() => null))?.email || 'unknown';
+      let existing = '';
+      try {
+        const cur = await airtableGet(TABLE(), id);
+        existing = cur?.fields?.['Work Log'] || '';
+      } catch { /* first entry, or the read failed — do not lose the new one */ }
+      fields['Work Log'] = `[${stamp} · ${who}] ${String(appendLog).trim()}` +
+        (existing ? `\n\n${existing}` : '');
+    }
 
     await airtableUpdate(TABLE(), id, fields);
     return ok({ id, updated: true });

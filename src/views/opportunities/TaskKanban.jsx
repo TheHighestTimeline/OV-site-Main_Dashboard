@@ -18,7 +18,8 @@
 import { useState, useMemo, useRef } from 'react';
 import { C, SANS, MONO } from '../../constants.js';
 import { createTask, updateTask } from '../../api.js';
-import TaskRowEditor from './TaskRowEditor.jsx';
+import TaskPage from './TaskPage.jsx';
+import { Modal, useConfirm } from '../../components/UI.jsx';
 
 export const TASK_LANES = [
   { id: 'Submitted',   canonical: 'Submitted',   also: ['open'],                                            color: () => C.ink3 },
@@ -51,13 +52,14 @@ function prank(p) {
 }
 
 export default function TaskKanban({
-  opp, stories = [], tasks = [], onChanged, showToast, compact, onBulkLink, linkTargets = [],
+  opp, stories = [], tasks = [], contacts = [], onChanged, showToast, compact, onBulkLink, linkTargets = [],
 }) {
   const [storyFilter, setStoryFilter] = useState('all');
   const [adding, setAdding]   = useState(null);   // lane id
   const [draft,  setDraft]    = useState('');
   const [busy,   setBusy]     = useState(false);
   const [openId, setOpenId]   = useState(null);
+  const [confirmNode, confirm] = useConfirm();
   const [dragOver, setDragOver] = useState(null);
   const dragged = useRef(null);
   const [picked, setPicked] = useState(() => new Set());
@@ -160,8 +162,31 @@ export default function TaskKanban({
     }
   }
 
+  const openTask = openId ? tasks.find(t => t.id === openId) : null;
+
   return (
     <div>
+      {confirmNode}
+
+      {openTask && (
+        <Modal
+          title={openTask.name || openTask.task || 'Task'}
+          sub={openTask._ownerName || 'Unlinked'}
+          onClose={() => setOpenId(null)}
+          size="full"
+        >
+          <TaskPage
+            task={openTask}
+            opportunities={linkTargets.length ? linkTargets : allOpps}
+            contacts={contacts}
+            onChanged={onChanged}
+            onClose={() => setOpenId(null)}
+            showToast={showToast}
+            confirm={confirm}
+          />
+        </Modal>
+      )}
+
       {onBulkLink && unassignedCount > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
@@ -302,29 +327,14 @@ export default function TaskKanban({
                   onDragStart={() => { dragged.current = t; }}
                   onDragEnd={() => { dragged.current = null; setDragOver(null); }}
                 >
-                  {openId === t.id ? (
-                    <div style={{ background: C.bg, borderRadius: 8 }}>
-                      <TaskRowEditor
-                        task={t}
-                        opportunities={allOpps}
-                        onChanged={onChanged}
-                        showToast={showToast}
-                      />
-                      <button onClick={() => setOpenId(null)} style={{
-                        border: 'none', background: 'none', color: C.ink3, cursor: 'pointer',
-                        fontFamily: MONO, fontSize: 9, padding: '0 0 6px 10px',
-                      }}>collapse</button>
-                    </div>
-                  ) : (
-                    <TaskCard
-                      t={t}
-                      onOpen={() => setOpenId(t.id)}
-                      ownerName={t._ownerName}
-                      unassigned={!(t.opportunityIds || []).length}
-                      selected={picked.has(t.id)}
-                      onToggleSelect={onBulkLink ? () => togglePick(t.id) : null}
-                    />
-                  )}
+                  <TaskCard
+                    t={t}
+                    onOpen={() => setOpenId(t.id)}
+                    ownerName={t._ownerName}
+                    unassigned={!(t.opportunityIds || []).length}
+                    selected={picked.has(t.id)}
+                    onToggleSelect={onBulkLink ? () => togglePick(t.id) : null}
+                  />
                 </div>
               ))}
             </div>

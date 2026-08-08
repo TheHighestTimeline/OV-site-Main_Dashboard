@@ -54,6 +54,18 @@ export const handler = async (event) => {
 
       // Opportunity + Client links (raw record IDs for edit-form selection)
       t.opportunityIds = r.fields['Opportunity'] || [];
+
+      // Named links live as JSON text because Airtable has no repeating group.
+      // Malformed JSON on a hand-edited record degrades to "no links" rather
+      // than taking out the whole list endpoint.
+      try {
+        const parsed = JSON.parse(t.links || '[]');
+        t.links = Array.isArray(parsed)
+          ? parsed.filter(l => l && l.url).map(l => ({ label: l.label || '', url: l.url }))
+          : [];
+      } catch {
+        t.links = [];
+      }
       t.clientIds      = r.fields['Client']      || [];
 
       // Entity (single-select) drives the company tabs. Expose it as the
