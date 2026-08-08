@@ -31,10 +31,16 @@ export const handler = async (event) => {
     const contactNameById = Object.fromEntries(contactRecs.map(c => [c.id, c.fields?.['Full Name'] || '']));
 
     // id -> task summary
+    // Enough to render and edit a task card without a second fetch: the card's
+    // Tasks board is a kanban, not a name list.
     const taskById = Object.fromEntries(taskRecs.map(t => [t.id, {
-      id:     t.id,
-      name:   t.fields?.['Action Name'] || '',
-      status: t.fields?.['Status'] || '',
+      id:       t.id,
+      name:     t.fields?.['Action Name'] || '',
+      task:     t.fields?.['Action Name'] || '',
+      status:   t.fields?.['Status'] || '',
+      priority: t.fields?.['Priority'] || '',
+      dueDate:  t.fields?.['Due Date'] || null,
+      opportunityIds: t.fields?.['Opportunity'] || [],
     }]));
 
     // id -> { name, taskIds } for each project

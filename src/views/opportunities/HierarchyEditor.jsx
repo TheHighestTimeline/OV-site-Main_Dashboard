@@ -45,7 +45,7 @@ const linkBtn = {
 };
 
 export default function HierarchyEditor({
-  opp, allOpps = [], onSave, onOpen, onCreateChild, busy,
+  opp, allOpps = [], onSave, onOpen, onCreateChild, onConfirm, busy,
 }) {
   const [pending, setPending] = useState(null);   // level chosen, parent not picked yet
   const [linkId,  setLinkId]  = useState('');
@@ -85,21 +85,45 @@ export default function HierarchyEditor({
     [allOpps, opp.id, opp.parentId],
   );
 
+  // Changing level re-parents a record, which moves it on every board and can
+  // orphan its children. It is a structural edit sitting in a dropdown next to
+  // cosmetic ones, so it asks first.
   function pickLevel(next) {
     if (next === level) { setPending(null); return; }
-    // Choosing Story without a parent is a legitimate end state, not a
-    // half-write: it is the record waiting to be filed under an epic.
-    if (next === 'story' && !opp.parentId) onSave({ level: 'Story' });
+
     if (next === 'epic') {
-      // Promote: clear the parent AND record the level, or the next read would
-      // fall back to the link and flip it straight back to story.
-      onSave({ parentId: null, level: 'Epic' });
-      setPending(null);
+      const kids = allOpps.filter(o => o.parentId === opp.id).length;
+      const parentName = byId[opp.parentId]?.name;
+      onConfirm?.({
+        message:
+          `Promote "${opp.name}" to a top-level epic?` +
+          (parentName ? ` It will be removed from ${parentName}.` : '') +
+          (kids ? ` Its ${kids} sub-opportunit${kids === 1 ? 'y stays' : 'ies stay'} attached to it.` : ''),
+        confirmLabel: 'Make it an epic',
+        onConfirm: async () => {
+          // Clear the parent AND record the level, or the next read falls back
+          // to the link and flips it straight back to story.
+          await onSave({ parentId: null, level: 'Epic' });
+          setPending(null);
+        },
+      });
       return;
     }
-    // Demote: needs a parent before it means anything, so hold the choice until
-    // one is picked rather than writing a half-state.
-    setPending('story');
+
+    const kids = allOpps.filter(o => o.parentId === opp.id).length;
+    onConfirm?.({
+      message:
+        `Make "${opp.name}" a story under another deal?` +
+        (kids ? ` ⚠ It has ${kids} sub-opportunit${kids === 1 ? 'y' : 'ies'} of its own, which will be left where they are.` : '') +
+        ' You will pick the parent next.',
+      confirmLabel: 'Make it a story',
+      onConfirm: async () => {
+        // A story with no parent is a legitimate end state — the record waiting
+        // to be filed — so the level is written now and the parent picked after.
+        if (!opp.parentId) await onSave({ level: 'Story' });
+        setPending('story');
+      },
+    });
   }
 
   function attachParent(id) {

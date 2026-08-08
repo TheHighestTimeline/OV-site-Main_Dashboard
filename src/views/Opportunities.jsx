@@ -5,6 +5,7 @@ import { cacheGet, cacheSet, cacheClear } from '../lib/cache.js';
 import HierarchyEditor from './opportunities/HierarchyEditor.jsx';
 import LinksEditor from './opportunities/LinksEditor.jsx';
 import TaskRowEditor from './opportunities/TaskRowEditor.jsx';
+import TaskKanban from './opportunities/TaskKanban.jsx';
 import { getOpportunities, createOpportunity, updateOpportunity, deleteOpportunity,
          getTasks, createTask, updateTask, deleteTask, getCompanies, getContacts,
          getAirtableSchema, airtableRecordUrl, getAppState, setAppState,
@@ -97,6 +98,19 @@ function byPriorityThenName(a, b) {
 }
 
 const levelOf = (o) => o?.level || (o?.parentId ? 'Story' : 'Epic');
+
+const UNLINKED_ID = '__unlinked__';
+
+const CARD_SECTIONS_KEY = 'ovmg.card.sections';
+const SECTIONS = [
+  { id: 'hierarchy', label: 'Level & sub-opportunities' },
+  { id: 'links',     label: 'Links' },
+  { id: 'contacts',  label: 'Contacts' },
+  { id: 'companies', label: 'Companies' },
+  { id: 'money',     label: 'Value & cost' },
+  { id: 'dates',     label: 'Dates & probability' },
+  { id: 'notes',     label: 'Notes' },
+];
 
 const hdrBtn = {
   border: `1px solid ${C.cr3}`, borderRadius: 6, background: 'transparent',
@@ -298,7 +312,7 @@ function LinkedTasks({ oppId, companyCat, showToast, extraTaskIds = null, allOpp
 // both editable pickers AND clickable chips that jump into the CRM. The tasks
 // underneath this opportunity sit at the bottom (add / advance / edit / remove,
 // live against the Master Action Board).
-function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild, onDuplicate, onConvertToTask }) {
+function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPatch, companiesList, contactsList, allOpps, onOpenOpp, onCreateChild, onDuplicate, onOpenThread, onTasksChanged }) {
   const lane   = canonicalStage(opp.stage, opp.lane);
   const sStyle = STAGE_STYLE[lane] || {};
   const save   = (patch) => onPatch(opp.id, patch);
@@ -349,6 +363,43 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       contacts:   [...(opp.contacts   || []), { id, name: ct?.name || '' }],
     });
   };
+  const [confirmNode, confirm] = useConfirm();
+  const [tab, setTab] = useState('home');
+  const [showSettings, setShowSettings] = useState(false);
+
+  // Section visibility is a per-user preference, not per-card: you either care
+  // about probability or you never do, and re-hiding it on every card would be
+  // worse than leaving it on.
+  const [visible, setVisible] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(CARD_SECTIONS_KEY) || '{}'); }
+    catch { return {}; }
+  });
+  const toggleSection = (id) => setVisible(prev => {
+    const next = { ...prev, [id]: prev[id] === false };
+    try { localStorage.setItem(CARD_SECTIONS_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
+  });
+
+  // Every task under this record: its own, plus every story's. Each row is
+  // tagged with which record it came from so the board can group and filter.
+  const childStories = useMemo(
+    () => (allOpps || []).filter(o => o.parentId === opp.id),
+    [allOpps, opp.id],
+  );
+  const cardTasks = useMemo(() => {
+    const owners = [opp, ...childStories];
+    const seen = new Set();
+    const out = [];
+    for (const o of owners) {
+      for (const t of (o.tasks || [])) {
+        if (seen.has(t.id)) continue;
+        seen.add(t.id);
+        out.push({ ...t, _ownerId: o.id, _ownerName: o.id === opp.id ? '' : o.name });
+      }
+    }
+    return out;
+  }, [opp, childStories]);
+
   const [addingContact, setAddingContact] = useState(false);
   const [ncBusy, setNcBusy] = useState(false);
   const [nc, setNc] = useState({ name: '', email: '', company: '', role: '' });
@@ -390,6 +441,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
 
   return (
     <Modal title={opp.name} onClose={onClose}>
+      {confirmNode}
       {/* Lane badge + entity — everything below it is editable in place */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: sStyle.hBg || C.ink5, color: '#fff', borderRadius: 999, padding: '2px 9px' }}>
@@ -405,11 +457,62 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
         {onDuplicate && (
           <button onClick={() => onDuplicate(opp)} title="Create an editable copy" style={hdrBtn}>⧉ Duplicate</button>
         )}
-        {onConvertToTask && (
-          <button onClick={() => onConvertToTask(opp)} title="Turn this into a task on the board" style={hdrBtn}>→ Task</button>
+        {onOpenThread && (
+          <button onClick={() => onOpenThread(opp)} title="Open this in Threads" style={hdrBtn}>◎ Thread</button>
         )}
+        <button onClick={() => setShowSettings(v => !v)} title="Choose which sections show" style={hdrBtn}>⚙</button>
         <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3 }}>edits save instantly</span>
       </div>
+
+      {/* Home | Tasks. The card was one long scroll with the task list buried at
+          the bottom; tasks are their own job and deserve their own surface. */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 12, borderBottom: `1px solid ${C.cr2}` }}>
+        {['home', 'tasks'].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{
+            padding: '7px 14px', border: 'none', background: 'transparent',
+            borderBottom: `2px solid ${tab === t ? C.acc : 'transparent'}`,
+            color: tab === t ? C.ink9 : C.ink3,
+            fontFamily: SANS, fontSize: 13, fontWeight: tab === t ? 600 : 400,
+            cursor: 'pointer', marginBottom: -1, textTransform: 'capitalize',
+          }}>
+            {t}{t === 'tasks' && cardTasks.length ? ` · ${cardTasks.length}` : ''}
+          </button>
+        ))}
+      </div>
+
+      {showSettings && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', border: `1px solid ${C.acc}`, borderRadius: 9, background: C.bg2 }}>
+          <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 7 }}>
+            Sections on this card
+          </div>
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {SECTIONS.map(sec => {
+              const on = visible[sec.id] !== false;
+              return (
+                <button key={sec.id} onClick={() => toggleSection(sec.id)} style={{
+                  padding: '4px 11px', borderRadius: 999, cursor: 'pointer',
+                  border: `1px solid ${on ? C.acc : C.cr3}`,
+                  background: on ? C.accS : 'transparent',
+                  color: on ? C.ink9 : C.ink3, fontFamily: SANS, fontSize: 11.5,
+                }}>{on ? '✓ ' : ''}{sec.label}</button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: C.ink3, marginTop: 7, lineHeight: 1.5 }}>
+            Saved for you across every card, so the ones you never use stay out of the way.
+          </div>
+        </div>
+      )}
+
+      {tab === 'tasks' ? (
+        <TaskKanban
+          opp={opp}
+          stories={childStories}
+          tasks={cardTasks}
+          onChanged={onTasksChanged}
+          showToast={showToast}
+        />
+      ) : (<>
 
       {/* ── Live entry fields ── */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
@@ -590,15 +693,18 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       </div>
 
       {/* ── Hierarchy, links, tasks ── */}
-      <HierarchyEditor
-        opp={opp}
-        allOpps={allOpps || []}
-        onSave={(patch, targetId) => onPatch(targetId || opp.id, patch)}
-        onOpen={onOpenOpp}
-        onCreateChild={onCreateChild ? () => onCreateChild(opp) : null}
-      />
+      {visible.hierarchy !== false && (
+        <HierarchyEditor
+          opp={opp}
+          allOpps={allOpps || []}
+          onSave={(patch, targetId) => onPatch(targetId || opp.id, patch)}
+          onOpen={onOpenOpp}
+          onCreateChild={onCreateChild ? () => onCreateChild(opp) : null}
+          onConfirm={confirm}
+        />
+      )}
 
-      <LinksEditor opp={opp} onSave={save} />
+      {visible.links !== false && <LinksEditor opp={opp} onSave={save} />}
 
       <div style={{ marginBottom: 4 }}>
         <span style={lbl}>Notes</span>
@@ -608,7 +714,7 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
       </div>
 
       {/* THE point of this popup: the tasks underneath this opportunity */}
-      <LinkedTasks oppId={opp.id} companyCat={opp.entity} showToast={showToast} extraTaskIds={opp.taskIds} allOpps={allOpps || []} />
+      </>)}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, gap: 8, flexWrap: 'wrap' }}>
         <a href={airtableRecordUrl(tableId, opp.id)} target="_blank" rel="noopener noreferrer"
@@ -1052,6 +1158,7 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
     setLevelFilter(v);
     try { localStorage.setItem('ovmg.opps.level', v); } catch { /* private mode */ }
   };
+  const [tasksList, setTasksList] = useState([]);
   const [contactsList,  setContactsList]  = useState([]);
   useEffect(() => {
     getCompanies().then(cs => setCompaniesList((cs || []).sort((a, b) => (a.name || '').localeCompare(b.name || '')))).catch(() => {});
@@ -1098,40 +1205,6 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
     }
   }, [showToast, load]);
 
-  // ── Convert to task ────────────────────────────────────────────────────────
-  // A cross-table move, so it asks first and says exactly what it will do. The
-  // opportunity is ARCHIVED, never deleted: its stage history, paperwork rows and
-  // linked documents stay reachable, and a wrong conversion is recoverable by
-  // moving the lane back.
-  const convertToTask = useCallback((o) => {
-    const kids = opps.filter(x => x.parentId === o.id).length;
-    const lines = [
-      `"${o.name}" becomes a task on the Master Action Board.`,
-      o.parentId ? 'The task is linked to its parent opportunity.' : 'The task starts unlinked — pick an opportunity on it afterwards.',
-      'The opportunity is moved to the Archive lane, not deleted, so its history stays.',
-    ];
-    if (kids) lines.push(`⚠ It still has ${kids} sub-opportunit${kids === 1 ? 'y' : 'ies'}, which will be left where they are and will no longer roll up anywhere.`);
-
-    confirm({
-      message: lines.join(' '),
-      confirmLabel: 'Convert to task',
-      onConfirm: async () => {
-        await createTask({
-          task:   o.name,
-          status: 'Not Started',
-          dueDate: o.closeDate || undefined,
-          priority: o.priority || undefined,
-          entity: o.entity || undefined,
-          opportunityIds: o.parentId ? [o.parentId] : [],
-          contactIds: o.contactIds || [],
-        });
-        await updateOpportunity(o.id, { lane: 'Archive' });
-        showToast?.(`"${o.name}" is now a task`);
-        setQuickId(null);
-        load();
-      },
-    });
-  }, [opps, confirm, showToast, load]);
 
   const patchOpp = useCallback(async (id, patch) => {
     setOpps(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
@@ -1202,6 +1275,7 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
           { v: 'epics',   l: 'Epics only' },
           { v: 'stories', l: 'Stories only' },
           { v: 'all',     l: 'Epics + stories' },
+          { v: 'tasks',   l: 'Tasks only' },
         ]}
       />
       <FilterDropdown
@@ -1225,6 +1299,37 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
   );
 
   // Cards grouped by LANE (custom per-company lanes or the canonical stages).
+  // Every task on the board, tagged with the opportunity it belongs to. Anything
+  // unlinked is grouped under a synthetic epic so it can be found and assigned
+  // rather than existing only in a place nobody opens.
+  // Only fetched for the tasks-only view; the deal board already carries the
+  // task rows it needs on each opportunity.
+  useEffect(() => {
+    if (levelFilter !== 'tasks') return;
+    let live = true;
+    getTasks().then(rows => { if (live) setTasksList(rows || []); }).catch(() => {});
+    return () => { live = false; };
+  }, [levelFilter, opps]);
+
+  const allTasksForBoard = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const o of opps) {
+      for (const t of (o.tasks || [])) {
+        if (seen.has(t.id)) continue;
+        seen.add(t.id);
+        out.push({ ...t, _ownerId: o.id, _ownerName: o.name });
+      }
+    }
+    for (const t of (tasksList || [])) {
+      if (seen.has(t.id)) continue;
+      if ((t.opportunityIds || []).length) continue;
+      seen.add(t.id);
+      out.push({ ...t, _ownerId: UNLINKED_ID, _ownerName: 'Unlinked' });
+    }
+    return out;
+  }, [opps, tasksList]);
+
   const byLane = useMemo(() => {
     const m = Object.fromEntries(lanes.map(l => [l.id, []]));
     scoped.forEach(o => {
@@ -1421,7 +1526,8 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               onOpenOpp={setQuickId}
               onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
               onDuplicate={duplicateOpp}
-              onConvertToTask={convertToTask}
+              onOpenThread={o => { setQuickId(null); navigate?.('threads', { openOppId: o.id }); }}
+              onTasksChanged={load}
             />
           );
         })()}
@@ -1459,6 +1565,22 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
                 </div>
               );
             })}
+          </div>
+        ) : levelFilter === 'tasks' ? (
+          /* Tasks-only. Different lanes on purpose: a task's statuses are not a
+             deal's stages, and forcing one vocabulary on both would make every
+             drag write something almost right. */
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', paddingBottom: 16 }}>
+            <TaskKanban
+              opp={{ id: UNLINKED_ID, name: 'All tasks', entity: '' }}
+              stories={[
+                ...opps.slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+                { id: UNLINKED_ID, name: 'Unlinked' },
+              ]}
+              tasks={allTasksForBoard}
+              onChanged={() => { load(); getTasks().then(r => setTasksList(r || [])).catch(() => {}); }}
+              showToast={showToast}
+            />
           </div>
         ) : (
           <div style={{ position: 'relative', flex: 1, minHeight: 0 }}>
@@ -1515,7 +1637,8 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
             onOpenOpp={setQuickId}
             onCreateChild={parent => { setQuickId(null); openForm({ parentId: parent.id, entity: parent.entity, dealCategory: parent.entity ? [parent.entity] : [] }); }}
             onDuplicate={duplicateOpp}
-            onConvertToTask={convertToTask}
+            onOpenThread={o => { setQuickId(null); navigate?.('threads', { openOppId: o.id }); }}
+            onTasksChanged={load}
           />
         );
       })()}

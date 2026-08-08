@@ -94,7 +94,6 @@ const NAV_META = [
   // coo-* endpoints do not, so using canAccess here would show the tab to
   // people who then get a 403 from every request it makes.
   { id: 'threads',    icon: '◈', label: 'Threads', rolesAny: ['coo', 'ops'] },
-  { id: 'tasks',      icon: '▤', label: 'Tasks'      },
   { id: 'tools',      icon: '⚒', label: 'Tools'      },
   { id: 'references', icon: '⊞', label: 'References' },
   { id: 'settings',   icon: '⚙', label: 'Settings'   },
@@ -211,7 +210,8 @@ export default function Dashboard({ user, onLogout }) {
       const el = document.activeElement;
       return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
     };
-    const GO = { o: 'overview', t: 'tasks', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day', h: 'threads' };
+    // g-t still reaches tasks — now as the Kanban board's tasks-only view.
+    const GO = { o: 'overview', t: 'kanban', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day', h: 'threads' };
     const onKey = e => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
