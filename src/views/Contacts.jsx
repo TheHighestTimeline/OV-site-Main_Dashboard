@@ -1,12 +1,15 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { C, SERIF, SANS, MONO, RELATES, stBg, stFg, fmtR } from '../constants.js';
-import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, Spinner, Avatar, SkeletonRows } from '../components/UI.jsx';
+import { Tag, Eyebrow, Btn, Inp, Sel, FR, VoiceMic, Spinner, Avatar, SkeletonRows, useConfirm } from '../components/UI.jsx';
 import { cacheGet, cacheSet } from '../lib/cache.js';
-import { getContacts, createContact, updateContact, mergeContacts, parseVoice, getAirtableSchema, getAppState, setAppState } from '../api.js';
+import { findContactDuplicates, duplicateReason } from '../lib/duplicates.js';
+import { getContacts, createContact, updateContact, parseVoice, getAirtableSchema, getAppState, setAppState,
+         previewContactDelete, deleteContact } from '../api.js';
 import useIsMobile from '../hooks/useIsMobile.js';
 import { companyNameMatchesSlug } from '../constants/roles.js';
 import ContactProfile from './ContactProfile.jsx';
 import CompanySnapshot from './CompanySnapshot.jsx';
+import MergeReview from './MergeReview.jsx';
 
 const addTa = {
   width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 8,
@@ -78,8 +81,10 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
   const [bulkRel,          setBulkRel]          = useState('');
   const [bulkBusy,         setBulkBusy]         = useState(false);
   const [paletteOpen,      setPaletteOpen]      = useState(false);  // ⌘K quick-jump
-  const [dupOpen,          setDupOpen]          = useState(false);  // duplicate review modal
+  const [dupOpen,          setDupOpen]          = useState(false);  // duplicate group picker
+  const [mergeIds,         setMergeIds]         = useState(null);   // → MergeReview
   const searchWrapRef = useRef(null);
+  const [confirmNode, confirm] = useConfirm();
 
   // Keyboard shortcuts: ⌘K/Ctrl+K quick-jump, "/" focuses search.
   useEffect(() => {
@@ -142,13 +147,65 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
     });
   };
 
-  // Merge duplicate contacts: fold dropIds into keepId (server reassigns links + deletes dups).
-  const mergeDuplicates = async (keepId, dropIds) => {
+  // ── Delete ─────────────────────────────────────────────────────────────────
+  // Asks the server what points at the record BEFORE the confirm, so the dialog
+  // can name the damage — "4 tasks, 2 deals and 11 activities point at Greg" —
+  // rather than asking "are you sure?" about a record whose weight is invisible
+  // from a table row. A contact carrying real work is nearly always one you
+  // meant to merge or bench, and that only becomes obvious when you can see it.
+  const askDeleteContact = async (c) => {
+    let preview = null;
+    try { preview = await previewContactDelete(c.id); }
+    catch { /* fall through to the generic warning */ }
+
+    const links = Object.entries(preview?.links || {}).filter(([, n]) => n > 0);
+    const detail = links.length
+      ? `${links.map(([l, n]) => `${n} ${l}`).join(', ')} point at them and will be unlinked — those records are kept. If this is a duplicate, merge it instead so the history survives.`
+      : 'Nothing links to them.';
+
+    confirm({
+      itemName: c.name,
+      confirmLabel: 'Delete contact',
+      message: `Delete “${c.name}”? ${detail} This can't be undone.`,
+      onConfirm: async () => {
+        try {
+          await deleteContact(c.id);
+          showToast(`Deleted ${c.name}`);
+          setActiveContact(null);
+          setSelIds(prev => prev.filter(id => id !== c.id));
+          loadContacts();
+        } catch (e) { showToast('Delete failed: ' + e.message); }
+      },
+    });
+  };
+
+  // Bulk delete runs one preview per record so the total is real, not estimated.
+  const askDeleteSelected = async () => {
+    const targets = contacts.filter(c => selIds.includes(c.id));
+    if (!targets.length) return;
+    let linked = 0;
     try {
-      for (const d of dropIds) await mergeContacts(keepId, d);
-      showToast(`Merged ${dropIds.length} duplicate${dropIds.length > 1 ? 's' : ''} ✓`);
-      setDupOpen(false); loadContacts();
-    } catch (e) { showToast('Merge failed: ' + e.message); }
+      const previews = await Promise.all(targets.map(c => previewContactDelete(c.id).catch(() => null)));
+      linked = previews.reduce((s, p) => s + (p?.total || 0), 0);
+    } catch { /* the count is a courtesy, not a gate */ }
+
+    confirm({
+      itemName: `${targets.length} contacts`,
+      confirmLabel: `Delete ${targets.length}`,
+      message: `Delete ${targets.length} contact${targets.length > 1 ? 's' : ''}?` +
+        (linked ? ` ${linked} linked record${linked > 1 ? 's' : ''} will be unlinked (those records are kept).` : '') +
+        " This can't be undone.",
+      onConfirm: async () => {
+        let done = 0;
+        for (const c of targets) {
+          try { await deleteContact(c.id); done++; }
+          catch (e) { showToast(`Could not delete ${c.name}: ${e.message}`); }
+        }
+        showToast(`Deleted ${done} contact${done === 1 ? '' : 's'}`);
+        setSelIds([]);
+        loadContacts();
+      },
+    });
   };
 
   // Bulk edit selected contacts (status / owner / add related-to entity).
@@ -193,17 +250,10 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
 
   const followupCount = useMemo(() => companyScoped.filter(needsFollowup).length, [companyScoped]);
 
-  // Duplicate detection: group by shared email, or exact normalized name.
-  const dupGroups = useMemo(() => {
-    const byKey = {};
-    companyScoped.forEach(c => {
-      const email = (c.email || '').trim().toLowerCase();
-      const key = email ? 'e:' + email : 'n:' + (c.name || '').trim().toLowerCase();
-      if (key === 'n:') return;
-      (byKey[key] = byKey[key] || []).push(c);
-    });
-    return Object.values(byKey).filter(a => a.length > 1);
-  }, [companyScoped]);
+  // Duplicate detection — see src/lib/duplicates.js. Matches on email, on a
+  // normalised name, and on the last ten digits of a phone number, and refuses
+  // to group two clearly different people who merely share an inbox.
+  const dupGroups = useMemo(() => findContactDuplicates(companyScoped), [companyScoped]);
 
   const filtered = companyScoped.filter(c => {
     if (followupOnly && !needsFollowup(c)) return false;
@@ -370,6 +420,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
 
   return (
     <div>
+      {confirmNode}
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <div>
@@ -408,6 +459,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
           <span style={{ fontSize: 16 }}>⚠</span>
           <div style={{ flex: 1, minWidth: 180, fontSize: 13, color: C.red }}>
             {dupGroups.length} possible duplicate {dupGroups.length > 1 ? 'sets' : 'set'} — e.g. <b>{(dupGroups[0].map(c => c.name).join(' / '))}</b>
+            <span style={{ opacity: .75 }}> ({duplicateReason(dupGroups[0])})</span>
           </div>
           <Btn v="gho" onClick={() => setDupOpen(true)}>Review</Btn>
         </div>
@@ -467,6 +519,13 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
             <Inp value={bulkOwner} onChange={e => setBulkOwner(e.target.value)} placeholder="Set owner…" sx={{ width: 130 }} />
             <Sel value={bulkRel} onChange={e => setBulkRel(e.target.value)} sx={{ width: 'auto' }}><option value="">+ Related to…</option>{RELATES.map(r => <option key={r}>{r}</option>)}</Sel>
             <Btn onClick={bulkApply} disabled={bulkBusy}>{bulkBusy ? 'Applying…' : 'Apply'}</Btn>
+            {/* Merge sits next to delete deliberately: two selected duplicates is
+                the case where delete is the wrong button, and it should be one
+                click away rather than somewhere else entirely. */}
+            {selIds.length >= 2 && (
+              <Btn v="gho" onClick={() => setMergeIds(selIds)}>Merge {selIds.length}</Btn>
+            )}
+            <Btn v="dan" onClick={askDeleteSelected} disabled={bulkBusy}>Delete</Btn>
             <Btn v="gho" onClick={() => setSelIds([])}>Clear</Btn>
           </div>
         </div>
@@ -493,6 +552,7 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
                   { label: 'Name', col: 'name' }, { label: 'Company', col: 'company' }, { label: 'Role', col: 'role' },
                   { label: 'Related to', col: null }, { label: 'Email', col: 'email' }, { label: 'Phone', col: null },
                   { label: 'Last contacted', col: 'last_contacted' }, { label: 'Status', col: 'status' }, { label: 'Type', col: null },
+                  { label: '', col: null },
                 ].map(({ label, col }) => {
                   const active = col && sortCol === col;
                   const arrow  = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : (col ? ' ▲▼' : '');
@@ -549,6 +609,10 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, fontFamily: MONO, whiteSpace: 'nowrap' }}><ContactBadge c={c} compact /></td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}>{c.status && <Tag bg={stBg(c.status)} fg={stFg(c.status)}>{c.status}</Tag>}</td>
                     <td style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}` }}>{c.type && <Tag bg="transparent" fg={C.ink5}>{c.type}</Tag>}</td>
+                    <td onClick={e => e.stopPropagation()} style={{ padding: '9px 14px', borderBottom: `1px solid ${C.cr1}`, whiteSpace: 'nowrap' }}>
+                      <button onClick={() => askDeleteContact(c)} title={`Delete ${c.name}`}
+                        style={{ background: 'none', border: `1px solid ${C.cr3}`, borderRadius: 5, color: C.red, fontFamily: MONO, fontSize: 11, padding: '2px 7px', cursor: 'pointer' }}>×</button>
+                    </td>
                   </tr>
                 );
               })}
@@ -611,66 +675,71 @@ export default function Contacts({ user, showToast, openOv, closeOv, setView, co
         />
       )}
 
-      {/* Duplicate review */}
+      {/* Duplicate sets → pick one → the field-by-field merge screen */}
       {dupOpen && (
         <DupReview
           groups={dupGroups}
           onClose={() => setDupOpen(false)}
           onOpen={c => { setDupOpen(false); setActiveContact(c); }}
-          onMerge={mergeDuplicates}
+          onReview={ids => { setDupOpen(false); setMergeIds(ids); }}
+        />
+      )}
+
+      {mergeIds && (
+        <MergeReview
+          kind="contact"
+          ids={mergeIds}
+          names={contacts.filter(c => mergeIds.includes(c.id)).map(c => c.name)}
+          onClose={() => setMergeIds(null)}
+          onDone={() => { setSelIds([]); loadContacts(); }}
+          showToast={showToast}
         />
       )}
     </div>
   );
 }
 
-// ── Duplicate review + merge modal ────────────────────────────────────────────
-function DupReview({ groups, onClose, onOpen, onMerge }) {
+// ── Duplicate sets ────────────────────────────────────────────────────────────
+// This screen only PICKS a set. Choosing the survivor and reconciling the fields
+// happens in MergeReview, which can see what links to each record and lets you
+// take the best value per field — neither of which fits in a list like this, and
+// both of which are the difference between a merge and a data loss.
+function DupReview({ groups, onClose, onOpen, onReview }) {
   const isMobile = useIsMobile();
-  const [primary, setPrimary] = useState({}); // groupIndex -> contactId (keep)
-  const [busy, setBusy] = useState(false);
   useEffect(() => {
     const esc = e => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, [onClose]);
 
-  const doMerge = async (gi, grp) => {
-    const keepId = primary[gi] || grp[0].id;
-    const keep = grp.find(c => c.id === keepId);
-    const dropIds = grp.filter(c => c.id !== keepId).map(c => c.id);
-    if (!dropIds.length) return;
-    if (!window.confirm(`Merge ${dropIds.length} record${dropIds.length > 1 ? 's' : ''} into “${keep.name}”?\n\nTheir notes, files, deals, tasks and referral links move to the kept contact, and the duplicate record${dropIds.length > 1 ? 's are' : ' is'} deleted. This can't be undone.`)) return;
-    setBusy(true);
-    await onMerge(keepId, dropIds);
-    setBusy(false);
-  };
-
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 175, background: 'rgba(14,16,20,.55)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 20 }}>
       <div onClick={e => e.stopPropagation()} style={{ position: 'relative', background: C.bg, borderRadius: isMobile ? 0 : 16, width: '100%', maxWidth: isMobile ? '100%' : 580, height: isMobile ? '100vh' : 'auto', maxHeight: isMobile ? '100vh' : '85vh', overflowY: 'auto', padding: isMobile ? '20px 16px' : 24, boxShadow: '0 24px 60px rgba(0,0,0,.4)' }}>
         <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: C.ink3, cursor: 'pointer' }}>×</button>
         <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.14em', textTransform: 'uppercase', color: C.ink3, marginBottom: 4 }}>Duplicates</div>
-        <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 22, margin: '0 0 6px', color: C.ink9 }}>Review & merge</h2>
-        <p style={{ fontSize: 12, color: C.ink5, margin: '0 0 16px' }}>Grouped by shared email or identical name. Pick which record to keep (●), then merge — the others' notes, files, deals, tasks and referral links move onto it and the duplicates are deleted.</p>
-        {groups.map((grp, i) => {
-          const keepId = primary[i] || grp[0].id;
-          return (
-            <div key={i} style={{ border: `1px solid ${C.cr2}`, borderRadius: 10, padding: 10, marginBottom: 12, background: C.bg2 }}>
-              {grp.map(c => (
-                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 8px', borderRadius: 8 }}>
-                  <input type="radio" name={`prim-${i}`} checked={keepId === c.id} onChange={() => setPrimary(p => ({ ...p, [i]: c.id }))} title="Keep this one" />
-                  <span onClick={() => onOpen(c)} style={{ flex: 1, fontFamily: SERIF, fontSize: 14, color: C.ink9, cursor: 'pointer' }}>{c.name} {keepId === c.id && <span style={{ fontSize: 10, color: C.grn }}>keep</span>}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.email || 'no email'}</span>
-                  <span onClick={() => onOpen(c)} style={{ color: C.ink3, fontSize: 13, cursor: 'pointer' }}>›</span>
-                </div>
-              ))}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
-                <Btn onClick={() => doMerge(i, grp)} disabled={busy}>{busy ? 'Merging…' : 'Merge into keep'}</Btn>
-              </div>
+        <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: 22, margin: '0 0 6px', color: C.ink9 }}>{groups.length} possible duplicate {groups.length === 1 ? 'set' : 'sets'}</h2>
+        <p style={{ fontSize: 12, color: C.ink5, margin: '0 0 16px', lineHeight: 1.5 }}>
+          Matched on email, on a normalised name, or on the last ten digits of a phone number.
+          Open a set to compare the records field by field before anything is merged.
+        </p>
+        {groups.map((grp, i) => (
+          <div key={i} style={{ border: `1px solid ${C.cr2}`, borderRadius: 10, padding: 10, marginBottom: 12, background: C.bg2 }}>
+            <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3, marginBottom: 6 }}>
+              {grp.length} records · {duplicateReason(grp)}
             </div>
-          );
-        })}
+            {grp.map(c => (
+              <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px' }}>
+                <Avatar name={c.name} size={22} />
+                <span onClick={() => onOpen(c)} style={{ flex: 1, fontFamily: SERIF, fontSize: 14, color: C.ink9, cursor: 'pointer' }}>{c.name}</span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: C.ink5 }}>{c.email || c.phone || 'no contact details'}</span>
+                <span onClick={() => onOpen(c)} style={{ color: C.ink3, fontSize: 13, cursor: 'pointer' }}>›</span>
+              </div>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+              <Btn onClick={() => onReview(grp.map(c => c.id))}>Compare & merge</Btn>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

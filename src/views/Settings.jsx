@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { C, SERIF, SANS, MONO } from '../constants.js';
-import { Eyebrow, Btn, Inp, FR, Toggle } from '../components/UI.jsx';
+import { Eyebrow, Btn, Inp, FR, Toggle, Spinner } from '../components/UI.jsx';
 import AccountSwitcher from '../components/AccountSwitcher.jsx';
+import { runAutoLog, getAppState, setAppState, getSupabaseHealth } from '../api.js';
 import { useUser } from '@clerk/clerk-react';
 
 // ── Section card wrapper ──────────────────────────────────────────────────────
@@ -41,6 +42,196 @@ function NotifRow({ label, desc, checked, onChange }) {
       </div>
       <Toggle checked={checked} onChange={onChange} />
     </div>
+  );
+}
+
+// ── Supabase health ───────────────────────────────────────────────────────────
+//
+// Answers the one question the Supabase dashboard cannot: which project are the
+// FUNCTIONS bound to? From the dashboard you are always looking at whichever
+// project you happened to open, so "the table is right there" and "the app says
+// it is missing" can both be true at once, and nothing on screen reveals it.
+//
+// The project ref shown here is the one that matters. Compare it against the ref
+// in your dashboard URL (supabase.com/dashboard/project/<ref>).
+function SupabaseHealthPanel({ showToast }) {
+  const [busy, setBusy]     = useState(false);
+  const [report, setReport] = useState(null);
+
+  const check = async () => {
+    setBusy(true);
+    try {
+      const r = await getSupabaseHealth();
+      setReport(r);
+      if (!r.missing?.length) showToast?.('All Supabase tables visible ✓');
+    } catch (e) {
+      showToast?.('Health check failed: ' + e.message);
+    }
+    setBusy(false);
+  };
+
+  const mono = { fontFamily: MONO, fontSize: 11 };
+
+  return (
+    <Section title="Supabase health">
+      <p style={{ fontSize: 13, color: C.ink5, margin: '0 0 12px', lineHeight: 1.55 }}>
+        Shows which Supabase project this app's functions are actually reading, and which tables
+        they can see. If a table looks present in your dashboard but the app insists it is missing,
+        the two are almost always <b>different projects</b> — this is how you find out.
+      </p>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Btn onClick={check} disabled={busy}>{busy ? 'Checking…' : 'Check now'}</Btn>
+        {busy && <Spinner size={16} />}
+      </div>
+
+      {report && (
+        <div style={{ marginTop: 14, padding: '12px 14px', background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 9 }}>
+          <div style={{ ...mono, color: C.ink3, letterSpacing: '.1em', textTransform: 'uppercase', fontSize: 9, marginBottom: 6 }}>
+            App is bound to project
+          </div>
+          <div style={{ ...mono, fontSize: 15, color: C.ink9, fontWeight: 700, marginBottom: 4 }}>
+            {report.projectRef || '— not configured —'}
+          </div>
+          <div style={{ ...mono, color: C.ink3, fontSize: 10, marginBottom: 12 }}>
+            Compare with supabase.com/dashboard/project/<b>&lt;ref&gt;</b>
+          </div>
+
+          {!report.env?.SUPABASE_URL_set && (
+            <div style={{ ...mono, color: C.red, marginBottom: 8 }}>SUPABASE_URL is not set in Netlify.</div>
+          )}
+          {!report.env?.SUPABASE_SERVICE_ROLE_KEY_set && (
+            <div style={{ ...mono, color: C.red, marginBottom: 8 }}>SUPABASE_SERVICE_ROLE_KEY is not set in Netlify.</div>
+          )}
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {(report.tables || []).map(t => (
+              <span key={t.table} title={t.visible ? 'Visible' : `${t.error || 'Not visible'} — ${t.file || ''}`}
+                style={{
+                  ...mono, fontSize: 10, padding: '2px 8px', borderRadius: 999,
+                  background: t.visible ? C.grnS : C.redS,
+                  color: t.visible ? C.grn : C.red,
+                  border: `1px solid ${t.visible ? C.grn : C.red}30`,
+                }}>
+                {t.visible ? '✓' : '✕'} {t.table}
+              </span>
+            ))}
+          </div>
+
+          <div style={{ ...mono, marginTop: 10, color: report.missing?.length ? C.yel : C.grn, lineHeight: 1.5 }}>
+            {report.summary}
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+// ── Auto-logging panel ────────────────────────────────────────────────────────
+//
+// Granola calls and Gmail threads become Activity rows and move Last Contacted.
+// Nothing else: no task is created, no stage advances, no obligation is closed.
+// That line is the reason this can run unattended at all — see the header of
+// netlify/functions/crm-autolog.js. Granola's action extraction stays in the
+// Review queue where a human approves it.
+//
+// "Run now" exists so the first run can be watched before the schedule is turned
+// on, which is the pattern every other scheduled job in this repo follows.
+function AutoLogPanel({ showToast }) {
+  const [busy,   setBusy]   = useState(false);
+  const [result, setResult] = useState(null);
+  const [last,   setLast]   = useState(null);
+
+  useEffect(() => {
+    getAppState('autolog:lastRun').then(d => setLast(d?.data || d || null)).catch(() => {});
+  }, []);
+
+  const run = async (only = null) => {
+    setBusy(true); setResult(null);
+    try {
+      const r = await runAutoLog(only);
+      setResult(r);
+      const summary = { ranAt: r.ranAt, gmailLogged: r.gmailLogged, granolaLogged: r.granolaLogged, unmatched: r.unmatched?.length || 0 };
+      setLast(summary);
+      setAppState('autolog:lastRun', summary).catch(() => {});
+      const total = (r.gmailLogged || 0) + (r.granolaLogged || 0);
+      showToast?.(total ? `Logged ${total} interaction${total > 1 ? 's' : ''} ✓` : 'Nothing new to log — everything is already recorded');
+    } catch (e) {
+      showToast?.('Auto-log failed: ' + e.message);
+    }
+    setBusy(false);
+  };
+
+  const line = { fontFamily: MONO, fontSize: 11, color: C.ink5 };
+
+  return (
+    <Section title="Auto-logging">
+      <p style={{ fontSize: 13, color: C.ink5, margin: '0 0 12px', lineHeight: 1.55 }}>
+        Turns Gmail threads and Granola calls into Activity rows on the right contact, and moves
+        their <b>Last Contacted</b> date. That date is what the Contacts board uses to decide who needs
+        follow-up, and until now only a manual “Log contact” click ever set it — so people you emailed
+        this morning still showed as untouched.
+      </p>
+      <p style={{ fontSize: 12, color: C.ink3, margin: '0 0 14px', lineHeight: 1.5 }}>
+        It records <i>that</i> a conversation happened, never what was agreed in it. No tasks are created
+        and no stages move; Granola's proposed actions still go to the Review queue for approval.
+        Re-running is safe — every row carries a key and is written at most once.
+      </p>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Btn onClick={() => run()} disabled={busy}>{busy ? 'Scanning…' : 'Run now'}</Btn>
+        <Btn v="gho" onClick={() => run('gmail')}   disabled={busy}>Gmail only</Btn>
+        <Btn v="gho" onClick={() => run('granola')} disabled={busy}>Granola only</Btn>
+        {busy && <Spinner size={16} />}
+      </div>
+
+      {last && !result && (
+        <div style={{ ...line, marginTop: 12 }}>
+          Last run {String(last.ranAt || '').slice(0, 16).replace('T', ' ')} · {last.gmailLogged || 0} email · {last.granolaLogged || 0} call
+          {last.unmatched ? ` · ${last.unmatched} unmatched` : ''}
+        </div>
+      )}
+
+      {result && (
+        <div style={{ marginTop: 14, padding: '12px 14px', background: C.bg, border: `1px solid ${C.cr3}`, borderRadius: 9 }}>
+          <div style={{ ...line, color: C.ink7 }}>
+            {result.gmailLogged || 0} email thread{result.gmailLogged === 1 ? '' : 's'} logged
+            {' · '}{result.granolaLogged || 0} call{result.granolaLogged === 1 ? '' : 's'} logged
+            {typeof result.gmailThreads === 'number' ? ` · ${result.gmailThreads} threads scanned` : ''}
+          </div>
+
+          {(result.skipped || []).length > 0 && (
+            <div style={{ ...line, marginTop: 8, color: C.yel }}>
+              Skipped: {result.skipped.join(' · ')}
+            </div>
+          )}
+
+          {/* Unmatched people are the actionable output. A name here means that
+              conversation reached nobody's timeline, and the fix is one contact
+              record — so it is listed, never auto-created. */}
+          {(result.unmatched || []).length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.12em', textTransform: 'uppercase', color: C.ink3, marginBottom: 6 }}>
+                {result.unmatched.length} not in the CRM — nothing was logged for these
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {result.unmatched.slice(0, 24).map((u, i) => (
+                  <span key={i} title={`via ${u.source}`}
+                    style={{ fontFamily: MONO, fontSize: 10, color: C.ink5, background: C.bg2, border: `1px solid ${C.cr3}`, borderRadius: 999, padding: '2px 8px' }}>
+                    {u.name || u.handle}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(result.errors || []).length > 0 && (
+            <div style={{ ...line, marginTop: 8, color: C.red }}>
+              {result.errors.length} error{result.errors.length > 1 ? 's' : ''}: {result.errors.slice(0, 2).join(' · ')}
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }
 
@@ -157,6 +348,12 @@ export default function Settings({ user, showToast, onLogout, openOv, closeOv, s
             />
           </div>
         </Section>
+
+        {/* ── Supabase health ────────────────────────────────────────────── */}
+        <SupabaseHealthPanel showToast={showToast} />
+
+        {/* ── Auto-logging ───────────────────────────────────────────────── */}
+        <AutoLogPanel showToast={showToast} />
 
         {/* ── Notifications ──────────────────────────────────────────────── */}
         <Section title="Notifications">

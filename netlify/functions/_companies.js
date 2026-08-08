@@ -18,17 +18,46 @@
 
 import { TB, listRecordsLenient, airtableCreate } from './_airtable.js';
 
-const COMPANIES_TBL = () => process.env.AIRTABLE_TABLE_COMPANIES || TB.COMPANIES;
+export const COMPANIES_TBL = () => process.env.AIRTABLE_TABLE_COMPANIES || TB.COMPANIES;
 
-const SUFFIX = /\b(llc|l\.l\.c|inc|incorporated|ltd|limited|corp|corporation|co|lp|llp|plc|gmbh|pty|sa|nv|bv)\.?$/i;
+/**
+ * App-shape ⇄ Airtable field names for the Companies table.
+ *
+ * Written out here rather than in `_airtable.js` because `companies-list.js`
+ * already read these fields by name directly, and a second spelling of the same
+ * mapping is exactly how the two drift apart.
+ */
+export const COMPANIES_MAP = {
+  name:              'Name',
+  entityCode:        'Entity Code',
+  shortCode:         'Short Code',
+  type:              'Type',
+  status:            'Status',
+  health:            'Health',
+  stage:             'Stage',
+  website:           'Website',
+  followUpDate:      'Follow Up Date',
+  subjectDescriptor: 'Subject Descriptor',
+  callsNotes:        'Calls/Notes',
+  summary:           'Summary',
+  waitingOn:         'Waiting On',
+};
 
-/** Normalised comparison key: case, punctuation and a trailing legal suffix. */
-export function companyKey(name) {
-  let s = String(name || '').trim().toLowerCase();
-  s = s.replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
-  for (let i = 0; i < 2 && SUFFIX.test(s); i++) s = s.replace(SUFFIX, '').trim();
-  return s.replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+/** A singleSelect / date field reads '' as a value to create, not as blank. */
+export function stripEmpty(fields) {
+  const out = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === undefined) continue;
+    out[k] = v === '' ? null : v;
+  }
+  return out;
 }
+
+// `companyKey` lives in src/lib/companyName.js so the Companies tab's duplicate
+// detection and this resolver can never disagree about what counts as the same
+// company — the same shim pattern `_stages.js` uses. esbuild inlines it.
+export { companyKey } from '../../src/lib/companyName.js';
+import { companyKey } from '../../src/lib/companyName.js';
 
 /**
  * Find or create companies for a list of typed names.

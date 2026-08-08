@@ -23,6 +23,7 @@ import AccountSwitcher from './components/AccountSwitcher.jsx';
 // PageSpeed. Now each view becomes its own chunk, fetched only when navigated to.
 const MyDay         = lazy(() => import('./views/MyDay.jsx'));
 const Contacts      = lazy(() => import('./views/Contacts.jsx'));
+const Companies     = lazy(() => import('./views/Companies.jsx'));
 const Tasks         = lazy(() => import('./views/Tasks.jsx'));
 const Opportunities = lazy(() => import('./views/Opportunities.jsx'));
 const Settings      = lazy(() => import('./views/Settings.jsx'));
@@ -89,6 +90,11 @@ const NAV_META = [
   { id: 'review',     icon: '☑', label: 'Review'     },
   { id: 'audio-dump', icon: '◎', label: 'Audio Dump', adminOnly: true },
   { id: 'contacts',   icon: '◉', label: 'Contacts'   },
+  // Companies sits directly under Contacts because it is the same CRM, one
+  // level up: every Activity, document and deal routes through a company, and
+  // until this tab existed the table was only reachable through a chip on a
+  // contact row.
+  { id: 'companies',  icon: '⌂', label: 'Companies'  },
   // Threads is gated on the coo/ops roles specifically, NOT on canAccess. Every
   // other tab lets any @onevibemediagroup.com address through, but the
   // coo-* endpoints do not, so using canAccess here would show the tab to
@@ -201,8 +207,9 @@ export default function Dashboard({ user, onLogout }) {
 
   // ── ⌘K + g-shortcuts (2026-07 UI pass) ─────────────────────────────────────
   // Press g then a letter to jump: g o Overview · g t Tasks · g k Kanban ·
-  // g c Contacts · g r Review · g m My Day · g h Threads. Ignored while typing
-  // in a field. ('h' because g t is already Tasks.)
+  // g c Contacts · g p Companies · g r Review · g m My Day · g h Threads.
+  // Ignored while typing in a field. ('h' because g t is already Tasks, and
+  // 'p' for comPanies because g c is already Contacts.)
   // NOTE: must stay BELOW the setView declaration above (TDZ crash otherwise).
   useEffect(() => {
     let goArmed = 0; // timestamp when 'g' was pressed
@@ -210,8 +217,9 @@ export default function Dashboard({ user, onLogout }) {
       const el = document.activeElement;
       return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
     };
-    // g-t still reaches tasks — now as the Kanban board's tasks-only view.
-    const GO = { o: 'overview', t: 'kanban', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day', h: 'threads' };
+    // g-t reaches tasks as the Kanban board's tasks-only view, since Tasks no
+    // longer has its own sidebar entry. g-p is the Companies tab.
+    const GO = { o: 'overview', t: 'kanban', k: 'kanban', c: 'contacts', r: 'review', m: 'my-day', h: 'threads', p: 'companies' };
     const onKey = e => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -266,6 +274,9 @@ export default function Dashboard({ user, onLogout }) {
       'audio-dump': user.isAdmin ? <AudioDump {...ctx} /> : <AccessDenied />,
       // §3.1: the global company scope filters every scoped view below.
       'contacts':   gateView('contacts',   <Contacts   {...ctx} companyFilter={scope} initialParams={view === 'contacts' ? viewParams : null} />),
+      // Not company-scoped: the scope pill picks one of OUR entities, and this
+      // tab is mostly counterparties. Filtering it by scope would empty it.
+      'companies':  gateView('companies',  <Companies  {...ctx} />),
       'tasks':      gateView('tasks',      <Tasks      {...ctx} companyFilter={scope} initialFilter={view === 'tasks' ? viewParams : null} />),
       // Main Kanban — all companies' opportunities in one board
       // (internal/external + Kanban⇄List). Same data as each company's Kanban
