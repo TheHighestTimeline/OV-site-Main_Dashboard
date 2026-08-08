@@ -15,7 +15,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { C, SANS, MONO } from '../../constants.js';
-import { getCooEvents, getDocumentsForContact } from '../../api.js';
+import { getCooEvents, getDocumentsForContact, getActivitiesFor } from '../../api.js';
 
 const KIND_COLOR = {
   message_in:   () => C.blu,
@@ -44,11 +44,18 @@ function daysSince(d) {
 export default function ThreadTab({ opp, stories = [], contacts = [], onOpenThreads }) {
   const [events, setEvents] = useState(null);
   const [docs,   setDocs]   = useState([]);
+  const [acts,   setActs]   = useState([]);
   const [note,   setNote]   = useState(null);
 
   const contactIds = useMemo(() => {
     const ids = new Set(opp.contactIds || []);
     for (const s of stories) for (const id of (s.contactIds || [])) ids.add(id);
+    return [...ids];
+  }, [opp, stories]);
+
+  const companyIds = useMemo(() => {
+    const ids = new Set(opp.companyIds || []);
+    for (const s of stories) for (const id of (s.companyIds || [])) ids.add(id);
     return [...ids];
   }, [opp, stories]);
 
@@ -72,10 +79,17 @@ export default function ThreadTab({ opp, stories = [], contacts = [], onOpenThre
         if (failed === results.length) {
           // Every read failed — almost always the unrun coo_* migration. Say so
           // rather than showing an empty timeline that implies nothing happened.
-          setNote('Message history is not available yet — the Supabase coo_* tables have not been created. Everything below is derived from Airtable records.');
+          setNote('Message-level history needs the Supabase coo_* tables, which have not been created yet. The timeline below is built from Airtable — logged calls and emails, documents, and dated work.');
         }
         setEvents(rows);
       });
+
+    // The emails and Granola transcripts, as crm-autolog files them. This is the
+    // half that works TODAY: those rows land in Airtable Activities regardless
+    // of the Supabase migration, so the timeline tells the real story either way.
+    getActivitiesFor({ contactIds, companyIds })
+      .then(rows => { if (live) setActs(rows || []); })
+      .catch(() => { if (live) setActs([]); });
 
     // Documents carry the paperwork half of the story: sent, signed, expiring.
     Promise.allSettled(contactIds.slice(0, 12).map(id => getDocumentsForContact(id)))
@@ -87,10 +101,27 @@ export default function ThreadTab({ opp, stories = [], contacts = [], onOpenThre
       });
 
     return () => { live = false; };
-  }, [opp.id, stories, contactIds]);
+  }, [opp.id, stories, contactIds, companyIds]);
 
   const timeline = useMemo(() => {
     const rows = [];
+
+    // Logged conversations — the emails and Granola calls crm-autolog files.
+    // Direction matters: "waiting on a response" is a claim about the last time
+    // THEY spoke, and an outbound email is not an answer.
+    for (const a of acts) {
+      if (!a.date) continue;
+      const inbound = /received|inbound|reply|replied/i.test(`${a.type || ''} ${a.title || ''}`);
+      rows.push({
+        at:    a.date,
+        kind:  inbound ? 'message_in' : a.source === 'Granola' ? 'note' : 'message_out',
+        title: a.title || a.type || 'Conversation',
+        // The AI summary is what was actually said, which is the whole reason
+        // to show a conversation rather than just count it.
+        body:  a.aiSummary || a.body || '',
+        meta:  [a.type, a.source].filter(Boolean).join(' · '),
+      });
+    }
 
     for (const e of (events || [])) {
       rows.push({
@@ -133,13 +164,37 @@ export default function ThreadTab({ opp, stories = [], contacts = [], onOpenThre
     return rows
       .filter(r => r.at)
       .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-  }, [events, docs, opp, stories]);
+  }, [events, docs, acts, opp, stories]);
 
   const lastInbound = useMemo(
     () => timeline.find(r => r.kind === 'message_in')?.at || null,
     [timeline],
   );
   const waitingDays = daysSince(lastInbound);
+
+  // Where this stands, in a sentence. The timeline below is the evidence; this
+  // is the read of it, and it is the line you actually open the tab for.
+  const standing = useMemo(() => {
+    const past = timeline.filter(r => !r.future);
+    if (!past.length) return null;
+
+    const latest = past[0];
+    const started = past[past.length - 1];
+    const opened = `Conversation opened ${fmt(started.at)}`;
+
+    if (latest.kind === 'message_out') {
+      const d = daysSince(latest.at);
+      return `${opened}. Waiting on a response — last outbound ${d === 0 ? 'today' : `${d} day${d === 1 ? '' : 's'} ago`}.`;
+    }
+    if (latest.kind === 'message_in') {
+      const d = daysSince(latest.at);
+      return `${opened}. They came back ${d === 0 ? 'today' : `${d} day${d === 1 ? '' : 's'} ago` } — the ball is here.`;
+    }
+    if (latest.kind === 'document') {
+      return `${opened}. Most recent movement is paperwork: ${latest.title.toLowerCase()}.`;
+    }
+    return `${opened}. Last recorded: ${latest.title}.`;
+  }, [timeline]);
 
   if (events === null) {
     return <div style={{ fontSize: 12, color: C.ink3, padding: '10px 0' }}>Reading the history…</div>;
@@ -170,6 +225,14 @@ export default function ThreadTab({ opp, stories = [], contacts = [], onOpenThre
           }}>Open in Threads ↗</button>
         )}
       </div>
+
+      {standing && (
+        <div style={{
+          padding: '10px 13px', marginBottom: 12, borderRadius: 9,
+          background: C.accS, border: `1px solid ${C.acc}44`,
+          fontFamily: SANS, fontSize: 13, color: C.ink9, lineHeight: 1.55,
+        }}>{standing}</div>
+      )}
 
       {note && (
         <div style={{
@@ -220,7 +283,10 @@ export default function ThreadTab({ opp, stories = [], contacts = [], onOpenThre
                   <span style={{ fontFamily: MONO, fontSize: 9, color: C.ink3, flexShrink: 0 }}>{fmt(r.at)}</span>
                 </div>
                 {r.body && (
-                  <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 2, lineHeight: 1.45 }}>{r.body}</div>
+                  <div style={{ fontSize: 11.5, color: C.ink3, marginTop: 2, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>{r.body}</div>
+                )}
+                {r.meta && (
+                  <div style={{ fontFamily: MONO, fontSize: 8.5, color: C.ink2, marginTop: 3 }}>{r.meta}</div>
                 )}
               </div>
             </div>

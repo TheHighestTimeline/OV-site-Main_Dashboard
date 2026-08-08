@@ -45,6 +45,17 @@ export const handler = async (event) => {
       activities = activities.filter(a => a.companyIds.includes(params.companyId));
     }
 
+    // A deal's history is the union of its people's conversations, and asking
+    // for them one at a time would be N round trips against a rate-limited base
+    // to re-filter the same list. Comma-separated ids, matched on either link.
+    if (params.contactIds || params.companyIds) {
+      const wantContacts = new Set(String(params.contactIds || '').split(',').filter(Boolean));
+      const wantCompanies = new Set(String(params.companyIds || '').split(',').filter(Boolean));
+      activities = activities.filter(a =>
+        a.contactIds.some(id => wantContacts.has(id)) ||
+        a.companyIds.some(id => wantCompanies.has(id)));
+    }
+
     return ok(activities);
   } catch (e) {
     return err(500, e.message);

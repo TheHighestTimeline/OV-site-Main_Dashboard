@@ -147,6 +147,14 @@ export const runAutoLog = (only = null) =>
 // with Carbon Sponge" even though the Contact also works with OVMG.)
 export const getActivities    = (companyId) => req(`activities-list?companyId=${encodeURIComponent(companyId)}`);
 export const getActivitiesForContact = (contactId) => req(`activities-list?contactId=${encodeURIComponent(contactId)}`);
+/** Every logged conversation touching any of these people or companies, in one read. */
+export const getActivitiesFor = ({ contactIds = [], companyIds = [] } = {}) => {
+  const qs = new URLSearchParams();
+  if (contactIds.length) qs.set('contactIds', contactIds.join(','));
+  if (companyIds.length) qs.set('companyIds', companyIds.join(','));
+  if (![...qs].length) return Promise.resolve([]);
+  return req(`activities-list?${qs.toString()}`);
+};
 export const createActivity   = data        => req('activities-create', { method: 'POST', body: JSON.stringify(data) });
 
 // Documents (Drive is the source of truth for the file; this stores metadata
