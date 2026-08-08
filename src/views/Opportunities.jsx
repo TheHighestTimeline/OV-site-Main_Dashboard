@@ -365,6 +365,11 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
   };
   const [confirmNode, confirm] = useConfirm();
   const [tab, setTab] = useState('home');
+  const [expanded, setExpanded] = useState(false);
+  // Renaming used to close the card and dump you into the side form. Editing the
+  // title in place is the whole fix: you stay where you are and keep working.
+  const [titleDraft, setTitleDraft] = useState(opp.name || '');
+  useEffect(() => { setTitleDraft(opp.name || ''); }, [opp.id, opp.name]);
   const [showSettings, setShowSettings] = useState(false);
 
   // Section visibility is a per-user preference, not per-card: you either care
@@ -440,8 +445,36 @@ function OppQuickView({ opp, onClose, onEdit, setView, showToast, tableId, onPat
   };
 
   return (
-    <Modal title={opp.name} onClose={onClose}>
+    <Modal
+      title={opp.name}
+      onClose={onClose}
+      full={expanded}
+      wide={!expanded && tab === 'tasks'}
+      headerRight={
+        <button
+          onClick={() => setExpanded(v => !v)}
+          title={expanded ? 'Back to a panel' : 'Expand to the full page'}
+          style={{ ...hdrBtn, flexShrink: 0 }}
+        >{expanded ? '⤡ Shrink' : '⤢ Expand'}</button>
+      }
+    >
       {confirmNode}
+
+      {/* Rename in place. */}
+      <div style={{ marginBottom: 12 }}>
+        <span style={lbl}>Name</span>
+        <input
+          value={titleDraft}
+          onChange={e => setTitleDraft(e.target.value)}
+          onBlur={() => {
+            const v = titleDraft.trim();
+            if (v && v !== opp.name) save({ name: v });
+            else if (!v) setTitleDraft(opp.name || '');
+          }}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          style={{ ...inp, fontSize: 14 }}
+        />
+      </div>
       {/* Lane badge + entity — everything below it is editable in place */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontFamily: MONO, fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: sStyle.hBg || C.ink5, color: '#fff', borderRadius: 999, padding: '2px 9px' }}>
@@ -1580,6 +1613,8 @@ export default function Opportunities({ showToast, openOv, closeOv, setView: nav
               tasks={allTasksForBoard}
               onChanged={() => { load(); getTasks().then(r => setTasksList(r || [])).catch(() => {}); }}
               showToast={showToast}
+              onBulkLink
+              linkTargets={opps}
             />
           </div>
         ) : (

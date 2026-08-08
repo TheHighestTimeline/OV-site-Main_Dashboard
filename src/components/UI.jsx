@@ -315,7 +315,15 @@ export function Eyebrow({ children }) {
 }
 
 // ── Modal ─────────────────────────────────────────────────────────────────────
-export function Modal({ title, onClose, children }) {
+/**
+ * `wide` gives a modal room to breathe; `full` takes over the page entirely.
+ *
+ * Full is not a bigger modal — it drops the backdrop and the centring so a card
+ * with a kanban inside it stops being a 500px column you scroll forever. The
+ * close button becomes a labelled Back, because an unlabelled × on a full page
+ * reads as "close the app" rather than "return to the board".
+ */
+export function Modal({ title, onClose, children, wide, full, headerRight }) {
   const isMobile = useIsMobile();
   const isTablet = useDevice() === 'tablet';
   useEffect(() => {
@@ -323,6 +331,36 @@ export function Modal({ title, onClose, children }) {
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, [onClose]);
+
+  if (full) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, zIndex: 200, background: C.bg,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center', gap: 12,
+          padding: isMobile ? '12px 16px' : '14px 24px',
+          borderBottom: `1px solid ${C.cr2}`,
+        }}>
+          <button onClick={onClose} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none',
+            background: 'none', color: C.ink5, cursor: 'pointer',
+            fontFamily: SANS, fontSize: 13, padding: 0, flexShrink: 0,
+          }}><span style={{ fontSize: 15 }}>‹</span> Back to board</button>
+          <h2 style={{
+            flex: 1, minWidth: 0, fontFamily: SERIF, fontWeight: 500,
+            fontSize: isMobile ? 17 : 20, letterSpacing: '-.02em', margin: 0, color: C.ink9,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{title}</h2>
+          {headerRight}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: isMobile ? '16px' : '20px 24px 32px' }}>
+          {children}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'grid', placeItems: isMobile ? 'stretch' : 'center', padding: isMobile ? 0 : 16 }}>
@@ -335,7 +373,7 @@ export function Modal({ title, onClose, children }) {
         position: 'relative', background: C.bg,
         borderRadius: isMobile ? 0 : 16,
         padding: isMobile ? '20px 16px' : 24,
-        width: '100%', maxWidth: isMobile ? '100%' : isTablet ? 580 : 500,
+        width: '100%', maxWidth: isMobile ? '100%' : wide ? 980 : isTablet ? 580 : 500,
         maxHeight: isMobile ? '100vh' : '85vh',
         height: isMobile ? '100vh' : 'auto',
         overflowY: 'auto',
@@ -343,7 +381,10 @@ export function Modal({ title, onClose, children }) {
         animation: 'ovmgPop .18s cubic-bezier(.2,.9,.3,1)',
       }}>
         <button onClick={onClose} style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: C.ink3, cursor: 'pointer' }}>×</button>
-        <h2 style={{ fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 19 : 22, letterSpacing: '-.02em', margin: '0 0 16px', color: C.ink9 }}>{title}</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 16px', paddingRight: 28 }}>
+          <h2 style={{ flex: 1, minWidth: 0, fontFamily: SERIF, fontWeight: 500, fontSize: isMobile ? 19 : 22, letterSpacing: '-.02em', margin: 0, color: C.ink9 }}>{title}</h2>
+          {headerRight}
+        </div>
         {children}
       </div>
     </div>

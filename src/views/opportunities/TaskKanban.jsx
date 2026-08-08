@@ -51,7 +51,7 @@ function prank(p) {
 }
 
 export default function TaskKanban({
-  opp, stories = [], tasks = [], onChanged, showToast, compact,
+  opp, stories = [], tasks = [], onChanged, showToast, compact, onBulkLink, linkTargets = [],
 }) {
   const [storyFilter, setStoryFilter] = useState('all');
   const [adding, setAdding]   = useState(null);   // lane id
@@ -60,6 +60,13 @@ export default function TaskKanban({
   const [openId, setOpenId]   = useState(null);
   const [dragOver, setDragOver] = useState(null);
   const dragged = useRef(null);
+  const [picked, setPicked] = useState(() => new Set());
+  const [bulkTarget, setBulkTarget] = useState('');
+  const togglePick = (id) => setPicked(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   // Everything under this record: its own tasks plus every story's, so an epic
   // answers "what is outstanding on this deal" in one place.
@@ -128,8 +135,80 @@ export default function TaskKanban({
     [opp, stories],
   );
 
+  const unassignedCount = useMemo(
+    () => scoped.filter(t => !(t.opportunityIds || []).length).length,
+    [scoped],
+  );
+
+  async function bulkLink() {
+    if (!bulkTarget || !picked.size) return;
+    setBusy(true);
+    try {
+      // One at a time rather than a batch: Airtable's limiter is shared and a
+      // partial failure should leave the successful ones linked, not roll back.
+      for (const id of picked) {
+        await updateTask(id, { opportunityIds: [bulkTarget] });
+      }
+      showToast?.(`Linked ${picked.size} task${picked.size === 1 ? '' : 's'}`);
+      setPicked(new Set());
+      setBulkTarget('');
+      onChanged?.();
+    } catch (e) {
+      showToast?.('Bulk link failed: ' + e.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div>
+      {onBulkLink && unassignedCount > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+          padding: '8px 11px', marginBottom: 10, borderRadius: 9,
+          background: `${C.yel}14`, border: `1px solid ${C.yel}55`,
+        }}>
+          <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '.06em', textTransform: 'uppercase', color: C.yel }}>
+            {unassignedCount} unassigned
+          </span>
+          <span style={{ fontSize: 11.5, color: C.ink5 }}>
+            {picked.size
+              ? `${picked.size} selected — pick a deal to link them to.`
+              : 'Tick the ones that belong together, or drag a card onto a deal.'}
+          </span>
+          <span style={{ flex: 1 }} />
+          {picked.size > 0 && (
+            <>
+              <select
+                value={bulkTarget}
+                onChange={e => setBulkTarget(e.target.value)}
+                style={{
+                  padding: '5px 9px', borderRadius: 7, border: `1px solid ${C.cr3}`,
+                  background: C.bg, color: C.ink9, fontFamily: SANS, fontSize: 12, outline: 'none',
+                  maxWidth: 260,
+                }}
+              >
+                <option value="">Link to…</option>
+                {linkTargets
+                  .slice()
+                  .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                  .map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+              <button onClick={bulkLink} disabled={busy || !bulkTarget} style={{
+                padding: '5px 12px', borderRadius: 7, border: 'none',
+                background: bulkTarget ? C.acc : C.cr3, color: '#fff',
+                fontFamily: MONO, fontSize: 10, letterSpacing: '.05em',
+                fontWeight: 600, cursor: bulkTarget ? 'pointer' : 'default',
+              }}>{busy ? '…' : `Link ${picked.size}`}</button>
+              <button onClick={() => setPicked(new Set())} style={{
+                border: 'none', background: 'none', color: C.ink3,
+                fontFamily: MONO, fontSize: 9.5, cursor: 'pointer',
+              }}>clear</button>
+            </>
+          )}
+        </div>
+      )}
+
       {stories.length > 0 && (
         <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
           <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '.1em', textTransform: 'uppercase', color: C.ink3 }}>
@@ -237,7 +316,14 @@ export default function TaskKanban({
                       }}>collapse</button>
                     </div>
                   ) : (
-                    <TaskCard t={t} onOpen={() => setOpenId(t.id)} ownerName={t._ownerName} />
+                    <TaskCard
+                      t={t}
+                      onOpen={() => setOpenId(t.id)}
+                      ownerName={t._ownerName}
+                      unassigned={!(t.opportunityIds || []).length}
+                      selected={picked.has(t.id)}
+                      onToggleSelect={onBulkLink ? () => togglePick(t.id) : null}
+                    />
                   )}
                 </div>
               ))}
@@ -249,7 +335,7 @@ export default function TaskKanban({
   );
 }
 
-function TaskCard({ t, onOpen, ownerName }) {
+function TaskCard({ t, onOpen, ownerName, unassigned, selected, onToggleSelect }) {
   const today   = new Date().toISOString().slice(0, 10);
   const overdue = t.dueDate && String(t.dueDate).slice(0, 10) < today;
   const p       = prank(t.priority);
@@ -258,9 +344,32 @@ function TaskCard({ t, onOpen, ownerName }) {
   return (
     <button onClick={onOpen} style={{
       display: 'block', width: '100%', textAlign: 'left', cursor: 'grab',
-      background: C.bg, border: `1px solid ${C.cr2}`, borderLeft: `3px solid ${pcol}`,
+      // Unassigned work is the thing you came to this view to clear, so it is
+      // marked loudly rather than left to blend into everything else.
+      background: selected ? C.accS : unassigned ? `${C.yel}14` : C.bg,
+      border: `1px solid ${selected ? C.acc : unassigned ? `${C.yel}66` : C.cr2}`,
+      borderLeft: `3px solid ${pcol}`,
       borderRadius: 7, padding: '7px 9px',
     }}>
+      {unassigned && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 }}>
+          {onToggleSelect && (
+            <span
+              onClick={e => { e.stopPropagation(); onToggleSelect(); }}
+              style={{
+                width: 13, height: 13, borderRadius: 3, flexShrink: 0,
+                border: `1px solid ${selected ? C.acc : C.cr3}`,
+                background: selected ? C.acc : 'transparent', color: '#fff',
+                fontSize: 9, lineHeight: '12px', textAlign: 'center', cursor: 'pointer',
+              }}
+            >{selected ? '✓' : ''}</span>
+          )}
+          <span style={{
+            fontFamily: MONO, fontSize: 8, letterSpacing: '.08em',
+            textTransform: 'uppercase', color: C.yel,
+          }}>Unassigned</span>
+        </div>
+      )}
       <div style={{ fontFamily: SANS, fontSize: 12, color: C.ink9, lineHeight: 1.3 }}>
         {t.name || t.task || '(untitled)'}
       </div>
